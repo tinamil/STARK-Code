@@ -75,3 +75,5 @@ body:not(.busy) .msg.user:hover .rewind { display: block; }
 .hint { font-size: 11px; opacity: .75; margin-top: 2px; min-height: 1em; }
 .hint.bad { color: var(--vscode-errorForeground); opacity: 1; }
 .hint.warn { color: var(--vscode-editorWarning-foreground, #cca700); opacity: 1; }
+.unlock { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 6px; color: var(--vscode-foreground); }
+.unlock .uurl { font-size: 11px; opacity: .7; overflow-wrap: anywhere; font-family: var(--vscode-editor-font-family); }

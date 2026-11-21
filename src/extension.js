@@ -164,6 +164,11 @@ class ChatViewProvider {
         this.refreshServerModels();
         break;
       }
+      case 'openUnlock': {
+        // Only gateway-provided https URLs, and only on the user's click.
+        if (typeof m.url === 'string' && /^https:\/\//i.test(m.url)) await vscode.env.openExternal(vscode.Uri.parse(m.url));
+        break;
+      }
       case 'openSettings': vscode.commands.executeCommand('workbench.action.openSettings', 'oaiAgent'); break;
       // ----- history -----
       case 'history': this.post({ type: 'history', items: await this.listChats() }); break;

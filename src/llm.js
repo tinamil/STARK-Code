@@ -20,6 +20,24 @@ function readMeta(h) {
   return meta;
 }
 
+/**
+ * STARK locks keys 14 days after creation or unlock and answers 401 with
+ * {"error": {"message": "API key locked ...", "unlock_url": "https://..."}}. Returns an LlmError
+ * carrying the unlock URL, or null if the body isn't a locked-key error.
+ */
+function lockedKeyError(bodyText) {
+  let j;
+  try { j = JSON.parse(bodyText); } catch { return null; }
+  const err = (j && j.error) || {};
+  const raw = typeof err.unlock_url === 'string' ? err.unlock_url : '';
+  if (!raw && !/locked/i.test(String(err.message || ''))) return null;
+  const url = /^https:\/\//i.test(raw) ? raw : '';
+  const e = new LlmError(`Your API key is locked. STARK locks keys 14 days after they're created or unlocked. ${url ? 'Unlock it, then send "continue".' : 'Unlock it on the API Keys page of the STARK portal, then send "continue".'}`, false);
+  e.code = 'key_locked';
+  if (url) e.unlockUrl = url;
+  return e;
+}
+
 function parseRetryAfter(v) {
   if (!v) return undefined;
   const n = Number(v);
@@ -43,7 +61,9 @@ async function post(url, body, { apiKey, headers = {}, signal }) {
   }
   if (!res.ok) {
     const t = await res.text().catch(() => '');
-    const hint = res.status === 401 ? ' (check the API key)' : res.status === 403 ? ' (key lacks scope for this model/endpoint)' : '';
+    const locked = res.status === 401 ? lockedKeyError(t) : null;
+    if (locked) throw locked;
+    const hint = res.status === 401 ? ' (the API key is invalid or expired; update it under Setup)' : res.status === 403 ? ' (key lacks scope for this model/endpoint)' : '';
     throw new LlmError(`HTTP ${res.status}${hint} from ${url}: ${t.slice(0, 2000)}`,
       res.status === 429 || res.status >= 500, parseRetryAfter(res.headers.get('retry-after')));
   }
@@ -272,7 +292,10 @@ function complete(opts) {
 async function listModels({ baseUrl, apiKey, headers = {} }) {
   const url = baseUrl.replace(/\/+$/, '') + '/models';
   const res = await fetch(url, { headers: { ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}), ...headers }, signal: AbortSignal.timeout(15000) });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) {
+    const t = await res.text().catch(() => '');
+    throw (res.status === 401 && lockedKeyError(t)) || new Error(`HTTP ${res.status}`);
+  }
   const j = await res.json();
   const arr = Array.isArray(j) ? j : (j.data || j.models || []);
   return arr.map((m) => (typeof m === 'string' ? { id: m } : {
@@ -331,6 +354,7 @@ async function testConnection(opts) {
     if (opts.model && models.length && !m) lines.push(`⚠ "${opts.model}" is not in the server's model list`);
     if (m && m.tools === false) lines.push(`⚠ The server says "${opts.model}" does not support tool calling`);
   } catch (e) {
+    if (e.code === 'key_locked') { lines.push(`✗ ${e.message.replace(/, then send "continue"\./, ', then test again.')}`); return { ok: false, lines, models, unlockUrl: e.unlockUrl }; }
     lines.push(`• Could not list models (${e.cause?.message || e.message}). Some servers don't support this.`);
   }
   if (!opts.model) { lines.push('✗ No model set'); return { ok: false, lines, models }; }
@@ -362,6 +386,7 @@ async function testConnection(opts) {
     if (meta.keyExpiringSoon) lines.push(`⚠ API key expires ${meta.keyExpiresAt || 'within 7 days'}`);
     return { ok: p.ok, lines, models };
   } catch (e) {
+    if (e.code === 'key_locked') { lines.push(`✗ ${e.message.replace(/, then send "continue"\./, ', then test again.')}`); return { ok: false, lines, models, unlockUrl: e.unlockUrl }; }
     lines.push(`✗ Request to ${ep} failed: ${e.message}`);
     return { ok: false, lines, models };
   }

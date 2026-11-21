@@ -119,7 +119,7 @@ class Agent {
       await this.loop(cfg, root);
     } catch (e) {
       if (this.abort.signal.aborted) this.ui.post({ type: 'info', text: 'Stopped.' });
-      else this.ui.post({ type: 'error', text: String(e.message || e) });
+      else this.ui.post({ type: 'error', text: String(e.message || e), unlockUrl: e.unlockUrl });
     } finally {
       this.busy = false;
       this.ui.post({ type: 'status', busy: false });

@@ -98,6 +98,15 @@
     else if (e.key === 'Enter' && e.target === document.body) { e.preventDefault(); answer(box, 'yes'); }
   });
 
+  /** Adds an "Unlock API key" button (opens the gateway's unlock page in the browser) and shows the URL. */
+  function unlockButton(container, url) {
+    const row = document.createElement('div');
+    row.className = 'unlock';
+    row.innerHTML = `<button class="primary">Unlock API key</button><span class="uurl">${esc(url)}</span>`;
+    row.querySelector('button').onclick = () => vscode.postMessage({ type: 'openUnlock', url });
+    container.appendChild(row);
+  }
+
   // ---------- side panel (setup / history) ----------
   function closePanel() { panel.hidden = true; panel.innerHTML = ''; delete panel.dataset.kind; }
   function showSetup(m) {
@@ -330,13 +339,19 @@
         o.hidden = false;
         o.className = m.running ? '' : m.ok ? 'good' : 'bad';
         o.textContent = m.running ? 'Testing… (sends one or two small requests)' : m.lines.join('\n');
+        const oldU = o.parentNode.querySelector('.unlock'); if (oldU) oldU.remove();
+        if (m.unlockUrl) { const holder = document.createElement('div'); o.after(holder); unlockButton(holder, m.unlockUrl); holder.replaceWith(...holder.childNodes); }
         if (m.suggestMode && $('sApi')) { $('sApi').value = m.suggestMode; o.textContent += `\n\nAPI switched to "${m.suggestMode}". Click Save to keep it.`; }
         break;
       }
       case 'history': showHistory(m.items); break;
       case 'panelClose': closePanel(); break;
       case 'info': add('info', esc(m.text)); break;
-      case 'error': add('error', esc(m.text)); break;
+      case 'error': {
+        const d = add('error', esc(m.text));
+        if (m.unlockUrl) unlockButton(d, m.unlockUrl);
+        break;
+      }
     }
   });
 
