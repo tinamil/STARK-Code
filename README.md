@@ -5,7 +5,7 @@ A coding agent for VS Code that works with any OpenAI-compatible `/chat/completi
 ## Install (offline)
 Download the `.vsix` from [Releases](https://github.com/tinamil/STARK-Code/releases), then run:
 
-    code --install-extension oai-agent-0.5.0.vsix
+    code --install-extension stark-code-<version>.vsix
 Or use the Extensions view: `...` menu → **Install from VSIX...**
 
 ## Setup
@@ -72,7 +72,7 @@ These files at the workspace root are added to the system prompt: `AGENTS.md`, `
 
 ## Building and releasing
 - Build: `npx @vscode/vsce package`. There are no dependencies and no build step.
-- Release: bump `version` in package.json, commit, then push a matching tag (`git tag v0.3.0 && git push origin v0.3.0`). The Release workflow builds the .vsix and attaches it to a GitHub release.
+- Release: bump `version` in package.json, commit, then push a matching tag (`git tag v<version> && git push origin v<version>`). The Release workflow builds the .vsix and attaches it to a GitHub release.
 
 ## Development
 - Run the tests with `npm test` (Node 22+, no dependencies). The PowerShell script-checker tests run when PowerShell is installed. Set `REQUIRE_POWERSHELL=1` to make a missing PowerShell an error, and `OAI_AGENT_PWSH` to choose a specific PowerShell.
