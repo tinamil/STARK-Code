@@ -367,7 +367,7 @@ class Agent {
    * (a single request larger than that could never be sent).
    */
   effectiveWindow(cfg) {
-    let w = cfg.contextWindow || 200000;
+    let w = cfg.contextWindow || 1000000;
     if (this.learnedWindow) w = Math.min(w, this.learnedWindow);
     const tpm = this.limits && this.limits.tokensLimit;
     if (tpm > 0 && tpm * 0.9 < w) {
