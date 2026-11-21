@@ -1,0 +1,193 @@
+{
+  "name": "oai-agent",
+  "displayName": "OAI Agent",
+  "description": "Autonomous coding agent for any OpenAI-compatible endpoint.",
+  "publisher": "local",
+  "version": "0.3.0",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "AI",
+    "Programming Languages"
+  ],
+  "main": "./src/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "oaiAgent",
+          "title": "OAI Agent",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "oaiAgent": [
+        {
+          "type": "webview",
+          "id": "oaiAgent.chat",
+          "name": "Agent"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "oaiAgent.setApiKey",
+        "title": "OAI Agent: Set API Key"
+      },
+      {
+        "command": "oaiAgent.newChat",
+        "title": "OAI Agent: New Chat"
+      },
+      {
+        "command": "oaiAgent.stop",
+        "title": "OAI Agent: Stop"
+      },
+      {
+        "command": "oaiAgent.approve",
+        "title": "OAI Agent: Allow Pending Action"
+      },
+      {
+        "command": "oaiAgent.deny",
+        "title": "OAI Agent: Deny Pending Action"
+      }
+    ],
+    "configuration": {
+      "title": "OAI Agent",
+      "properties": {
+        "oaiAgent.apiMode": {
+          "type": "string",
+          "enum": [
+            "chat",
+            "responses"
+          ],
+          "default": "chat",
+          "enumDescriptions": [
+            "POST {baseUrl}/chat/completions",
+            "POST {baseUrl}/responses (OpenAI Responses API, stateless)"
+          ],
+          "description": "Which OpenAI-compatible API to use. Use 'responses' if your gateway only passes tool definitions through /responses."
+        },
+        "oaiAgent.baseUrl": {
+          "type": "string",
+          "default": "http://localhost:11434/v1",
+          "description": "OpenAI-compatible base URL (the part before /chat/completions)."
+        },
+        "oaiAgent.model": {
+          "type": "string",
+          "default": "",
+          "description": "Model name sent to the endpoint. Must support tool/function calling."
+        },
+        "oaiAgent.models": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Models to show in the model picker (in addition to those the server lists)."
+        },
+        "oaiAgent.contextWindow": {
+          "type": "number",
+          "default": 32000,
+          "description": "Model context window in tokens. History is auto-summarized at ~70%."
+        },
+        "oaiAgent.maxTokens": {
+          "type": "number",
+          "default": 0,
+          "description": "max_tokens per response (0 = don't send)."
+        },
+        "oaiAgent.temperature": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "default": null,
+          "description": "Sampling temperature (null = don't send)."
+        },
+        "oaiAgent.maxSteps": {
+          "type": "number",
+          "default": 100,
+          "description": "Max model calls per user message."
+        },
+        "oaiAgent.approvalMode": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "autoEdit",
+            "auto"
+          ],
+          "default": "ask",
+          "enumDescriptions": [
+            "Ask before file edits, commands and web fetches",
+            "Auto-approve file edits; ask for commands and web fetches",
+            "Never ask (dangerous)"
+          ]
+        },
+        "oaiAgent.autoApproveCommands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "ls",
+            "pwd",
+            "git status",
+            "git diff",
+            "git log"
+          ],
+          "description": "Command prefixes that run without asking."
+        },
+        "oaiAgent.shell": {
+          "type": "string",
+          "default": "",
+          "description": "Shell for run_command (empty = system default)."
+        },
+        "oaiAgent.commandTimeoutMs": {
+          "type": "number",
+          "default": 120000
+        },
+        "oaiAgent.maxToolOutputChars": {
+          "type": "number",
+          "default": 20000
+        },
+        "oaiAgent.extraHeaders": {
+          "type": "object",
+          "default": {},
+          "description": "Extra HTTP headers sent with each request."
+        },
+        "oaiAgent.extraBody": {
+          "type": "object",
+          "default": {},
+          "description": "Extra JSON fields merged into each request body."
+        },
+        "oaiAgent.customInstructions": {
+          "type": "string",
+          "default": "",
+          "editPresentation": "multilineText",
+          "description": "Appended to the system prompt."
+        }
+      }
+    },
+    "keybindings": [
+      {
+        "command": "oaiAgent.approve",
+        "key": "ctrl+alt+y",
+        "mac": "cmd+alt+y",
+        "when": "oaiAgent.awaitingApproval"
+      },
+      {
+        "command": "oaiAgent.deny",
+        "key": "ctrl+alt+n",
+        "mac": "cmd+alt+n",
+        "when": "oaiAgent.awaitingApproval"
+      }
+    ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tinamil/STARK-Code"
+  }
+}
