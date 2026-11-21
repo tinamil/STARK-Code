@@ -89,3 +89,4 @@ body:not(.busy) .msg.user:hover .rewind { display: block; }
 .diff .del { background: var(--vscode-diffEditor-removedLineBackground, rgba(255, 0, 0, .2)); }
 .diff .add .sig { color: var(--vscode-gitDecoration-addedResourceForeground, #81b88b); }
 .diff .del .sig { color: var(--vscode-gitDecoration-deletedResourceForeground, #c74e39); }
+#btnCompact { font-size: 11px; padding: 2px 8px; } body.busy #btnCompact { opacity: .4; pointer-events: none; } .msg.compacted details { font-style: normal; margin-top: 4px; }

@@ -67,6 +67,8 @@
     const text = input.value.trim();
     if (!text) return;
     input.value = '';
+    const cmd = text.match(/^\/compact(?:\s+([\s\S]*))?$/i);
+    if (cmd) { vscode.postMessage({ type: 'compact', focus: cmd[1] || '' }); return; }
     vscode.postMessage({ type: 'send', text, includeContext: $('ctx').checked });
   }
   send.onclick = submit;
@@ -74,6 +76,7 @@
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); submit(); }
   });
   $('btnNew').onclick = () => vscode.postMessage({ type: 'new' });
+  $('btnCompact').onclick = () => { if (!busy) vscode.postMessage({ type: 'compact', focus: '' }); };
   $('btnSetup').onclick = () => (panel.dataset.kind === 'setup' && !panel.hidden) ? closePanel() : vscode.postMessage({ type: 'getSetup' });
   $('btnHistory').onclick = () => (panel.dataset.kind === 'history' && !panel.hidden) ? closePanel() : vscode.postMessage({ type: 'history' });
   modelSel.onchange = () => vscode.postMessage({ type: 'setModel', model: modelSel.value });
@@ -374,6 +377,12 @@
       }
       case 'history': showHistory(m.items); break;
       case 'panelClose': closePanel(); break;
+      case 'compacted': {
+        const d = add('info compacted', `Conversation compacted: about ${Math.round(m.before / 1000)}k → ${Math.round(m.after / 1000)}k tokens. Files and Rewind for earlier edits are unaffected. <details><summary>Summary the agent kept</summary><pre></pre></details>`);
+        d.querySelector('pre').textContent = m.summary;
+        $('usage').textContent = '';
+        break;
+      }
       case 'info': add('info', esc(m.text)); break;
       case 'error': {
         const d = add('error', esc(m.text));

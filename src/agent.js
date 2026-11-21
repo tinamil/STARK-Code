@@ -4,6 +4,8 @@ const { complete } = require('./llm');
 const { toolDefs, getTool, truncate, resolvePath } = require('./tools');
 const { buildSystemPrompt } = require('./prompt');
 const { diffLines } = require('./diff');
+const readonly = require('./readonly');
+const psreadonly = require('./psreadonly');
 
 const estTokens = (msgs) => Math.ceil(JSON.stringify(msgs).length / 3.5);
 // Strip internal fields (prefixed with _) before sending to the API.
@@ -247,10 +249,25 @@ class Agent {
     if (this.sessionAllowed.has(tool.name)) return null;
     if (tool.name === 'run_command') {
       const cmd = String(args.command || '').trim();
+      // Read-only commands inside the workspace (Get-Content, git status, node --check, read-only
+      // PowerShell scripts, ...) run without asking. prep.readOnly is computed in execTool.
+      if (cfg.autoApproveReadOnlyCommands !== false && prep.readOnly) return null;
       // Only auto-approve simple commands (no chaining/redirection) matching a prefix.
       if (!/[;&|`$<>\r\n]/.test(cmd) && (cfg.autoApproveCommands || []).some((p) => cmd === p || cmd.startsWith(p + ' '))) return null;
     }
     return { allowAlways: true };
+  }
+
+  /** Simple commands are checked by pattern; PowerShell scripts by PowerShell's parser (when available). */
+  async isReadOnlyCommand(args, cfg, root) {
+    const cmd = String(args.command || '').trim();
+    const cwd = resolvePath(root, args.cwd || '.');
+    if (readonly.classify(cmd, { root, cwd }).ok) return true;
+    if (cfg.autoApproveReadOnlyScripts === false) return false;
+    const shell = cfg.shell || (process.platform === 'win32' ? (process.env.ComSpec || 'cmd.exe') : '/bin/sh');
+    const script = psreadonly.extractScript(cmd, { shell });
+    if (!script) return false;
+    try { return (await psreadonly.classifyPowerShell(script, { root, cwd })).ok; } catch { return false; }
   }
 
   async execTool(tc, cfg, root) {
@@ -274,6 +291,7 @@ class Agent {
       if (tool.category === 'edit' && prep.path && fs.existsSync(prep.path) && !this.readFiles.has(prep.path)) {
         return done(false, `Error: read ${args.path} with read_file before modifying it.`);
       }
+      if (tool.name === 'run_command' && cfg.autoApproveReadOnlyCommands !== false) prep.readOnly = await this.isReadOnlyCommand(args, cfg, root);
       // Diff of the proposed change, shown in the approval card and in the tool row.
       const diff = typeof prep.newContent === 'string' ? diffLines(prep.oldContent, prep.newContent) : null;
       if (diff) prep.summary = `${prep.summary} (+${diff.adds} −${diff.dels})`;
@@ -337,20 +355,10 @@ class Agent {
     if (head.length < 2) { this.shrinkToolOutputs(); return; }
 
     this.ui.post({ type: 'info', text: 'Context is getting full — summarizing earlier conversation…' });
-    const transcript = head.map((m) => {
-      if (m.role === 'tool') return `[tool result]\n${String(m.content).slice(0, 1500)}`;
-      let s = `[${m.role}]\n${m.content || ''}`;
-      if (m.tool_calls) s += '\n' + m.tool_calls.map((t) => `-> ${t.function.name}(${t.function.arguments.slice(0, 500)})`).join('\n');
-      return s;
-    }).join('\n\n');
-    const maxChars = Math.floor(window * 0.5 * 3.5);
-    const r = await this.callModel(cfg, [
-      { role: 'system', content: 'You compress coding-agent transcripts. Write a dense summary that lets the agent continue the work: the user\'s requests (quote them verbatim), decisions made, files read/changed and how, commands run and their outcomes, errors encountered, current state, and remaining TODOs. No preamble.' },
-      { role: 'user', content: transcript.length > maxChars ? '...[older part omitted]...\n' + transcript.slice(-maxChars) : transcript },
-    ], false);
+    const summary = await this.summarize(cfg, head, window);
     this.messages = [
       this.messages[0],
-      { role: 'user', content: `[Summary of earlier conversation in this session]\n${r.content}` },
+      { role: 'user', content: `[Summary of earlier conversation in this session]\n${summary}` },
       { role: 'assistant', content: 'Understood. Continuing from the summary.' },
       ...this.messages.slice(cut),
     ];
@@ -359,6 +367,57 @@ class Agent {
     }
     this.readFiles.clear();
     if (estTokens(this.messages) > window * 0.7) this.shrinkToolOutputs();
+  }
+
+  /** Ask the model for a summary of `msgs` that lets the work continue. `focus` is optional user guidance. */
+  async summarize(cfg, msgs, window, focus) {
+    const transcript = msgs.map((m) => {
+      if (m.role === 'tool') return `[tool result]\n${String(m.content).slice(0, 1500)}`;
+      let s = `[${m.role}]\n${m.content || ''}`;
+      if (m.tool_calls) s += '\n' + m.tool_calls.map((t) => `-> ${t.function.name}(${String(t.function.arguments).slice(0, 500)})`).join('\n');
+      return s;
+    }).join('\n\n');
+    const maxChars = Math.floor(window * 0.5 * 3.5);
+    const r = await this.callModel(cfg, [
+      { role: 'system', content: 'You compress coding-agent transcripts. Write a dense summary that lets the agent continue the work: the user\'s requests (quote them verbatim), decisions made, files read/changed and how, commands run and their outcomes, errors encountered, current state, and remaining TODOs. No preamble.' + (focus ? `\n\nThe user asked the summary to focus on: ${focus}` : '') },
+      { role: 'user', content: transcript.length > maxChars ? '...[older part omitted]...\n' + transcript.slice(-maxChars) : transcript },
+    ], false);
+    if (!r.content || !r.content.trim()) throw new Error('The model returned an empty summary.');
+    return r.content.trim();
+  }
+
+  /**
+   * Summarize the whole conversation now (the user's /compact). Keeps the system prompt, replaces
+   * everything else with the summary. File checkpoints are kept, so earlier edits can still be reverted.
+   */
+  async compactNow(focus) {
+    if (this.busy) throw new Error('Wait for the agent to finish (or stop it) before compacting.');
+    const body = this.messages.slice(1);
+    if (!body.some((m) => m.role === 'user' && m._turn)) { this.ui.post({ type: 'info', text: 'Nothing to compact yet.' }); return false; }
+    const cfg = this.getConfig();
+    this.busy = true;
+    this.abort = new AbortController();
+    this.ui.post({ type: 'status', busy: true });
+    this.ui.post({ type: 'info', text: `Compacting the conversation${focus ? ` (focus: ${focus})` : ''}…` });
+    try {
+      const before = estTokens(this.messages);
+      const summary = await this.summarize(cfg, body, this.effectiveWindow(cfg), focus);
+      this.messages = [
+        this.messages[0],
+        { role: 'user', content: `[Summary of earlier conversation in this session]\n${summary}` },
+        { role: 'assistant', content: 'Understood. Continuing from the summary.' },
+      ];
+      this.readFiles.clear();
+      this.ui.post({ type: 'compacted', summary, before, after: estTokens(this.messages) });
+      return true;
+    } catch (e) {
+      if (this.abort.signal.aborted) this.ui.post({ type: 'info', text: 'Compaction stopped; the conversation is unchanged.' });
+      else this.ui.post({ type: 'error', text: `Compaction failed; the conversation is unchanged. ${e.message || e}`, unlockUrl: e.unlockUrl });
+      return false;
+    } finally {
+      this.busy = false;
+      this.ui.post({ type: 'status', busy: false });
+    }
   }
 
   shrinkToolOutputs() {

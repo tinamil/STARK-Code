@@ -3,7 +3,7 @@
   "displayName": "OAI Agent",
   "description": "Autonomous coding agent for any OpenAI-compatible endpoint.",
   "publisher": "local",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "license": "MIT",
   "engines": {
     "vscode": "^1.85.0"
@@ -139,6 +139,16 @@
             "git log"
           ],
           "description": "Command prefixes that run without asking."
+        },
+        "oaiAgent.autoApproveReadOnlyCommands": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run commands that only read (Get-Content, Get-ChildItem, Select-String, type, dir, findstr, cat, grep, git status/diff/log, node --check, tsc --noEmit, --version checks) without asking, when every path they touch is inside the workspace. Commands with pipes, variables, chaining or redirects always ask."
+        },
+        "oaiAgent.autoApproveReadOnlyScripts": {
+          "type": "boolean",
+          "default": true,
+          "description": "Also run read-only PowerShell scripts (pipelines, variables, ForEach-Object, [regex] calls) without asking. PowerShell's own parser analyzes the script without running it; it runs only if every command, .NET call and path is read-only and inside the workspace. Needs PowerShell (built into Windows)."
         },
         "oaiAgent.shell": {
           "type": "string",

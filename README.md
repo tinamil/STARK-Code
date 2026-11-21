@@ -5,7 +5,7 @@ A coding agent for VS Code that works with any OpenAI-compatible `/chat/completi
 ## Install (offline)
 Download the `.vsix` from [Releases](https://github.com/tinamil/STARK-Code/releases), then run:
 
-    code --install-extension oai-agent-0.4.0.vsix
+    code --install-extension oai-agent-0.5.0.vsix
 Or use the Extensions view: `...` menu → **Install from VSIX...**
 
 ## Setup
@@ -18,6 +18,9 @@ read_file, write_file, edit_file, list_dir, glob, grep (uses VS Code's bundled r
 
 ## Context window
 `oaiAgent.contextWindow` defaults to 1,000,000 tokens (Gemini 3's size). When the conversation reaches about 70% of it, older messages are summarized. A larger window keeps more detail but uses more tokens, because each step resends the conversation. Lower it under **Setup** to save credits. If a model's real limit is smaller, the agent notices the server's error, uses a smaller limit for that chat, summarizes and retries.
+
+## Compacting
+Type `/compact` (or click **Compact**) to summarize the conversation now and free up context, for example before starting a new task in the same chat. Add a note on what to keep: `/compact keep the API design decisions`. The summary is shown and can be expanded. Files, and Rewind for earlier edits, are unaffected. The agent also compacts automatically at about 70% of the context window.
 
 ## API mode
 `oaiAgent.apiMode` can be `chat` (`/chat/completions`) or `responses` (`/responses`, stateless with `store:false`). Some gateways pass tool definitions through only one of these. **Test connection** checks the selected mode and falls back to the other if tool calling fails.
@@ -47,6 +50,8 @@ STARK locks API keys 14 days after they're created or unlocked. When that happen
   - `autoEdit`: file edits run without asking.
   - `auto`: nothing asks.
 - Edit approvals include a **View diff** button.
+- Read-only commands run without asking, as long as every path they touch is inside the workspace. Examples: `Get-Content`, `Get-ChildItem`, `Select-String`, `type`, `dir`, `findstr`, `cat`, `grep`, `git status/diff/log/show`, `node --check`, `tsc --noEmit`, `--version` checks. They also run without asking when wrapped in `powershell -NoProfile -Command "..."`. Anything with pipes, variables, chaining, redirects or script blocks still asks. Turn this off with `oaiAgent.autoApproveReadOnlyCommands`.
+- Read-only PowerShell scripts (pipelines, variables, `ForEach-Object`, `[regex]::Matches`, …) also run without asking. PowerShell's own parser analyzes the script without running it. It runs only if every command, .NET call, method, type and path is on a read-only list and inside the workspace, and the script is passed as one cleanly quoted argument (`powershell -NoProfile -Command "…"` with no inner double quotes). Anything else asks. Turn this off with `oaiAgent.autoApproveReadOnlyScripts`.
 - These always ask, even in `auto` mode, and never offer "Always allow":
   - destructive commands (`rm -rf`, `git push --force`, `git reset --hard`, `DROP TABLE`, `sudo`, `terraform destroy` and similar)
   - edits to files outside the workspace
