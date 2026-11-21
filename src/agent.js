@@ -6,7 +6,13 @@ const { buildSystemPrompt } = require('./prompt');
 
 const estTokens = (msgs) => Math.ceil(JSON.stringify(msgs).length / 3.5);
 // Strip internal fields (prefixed with _) before sending to the API.
-const forApi = (msgs) => msgs.map((m) => { const o = {}; for (const k in m) if (k[0] !== '_') o[k] = m[k]; return o; });
+// Also drop empty content on tool-call-only assistant messages (chats saved by older versions have "").
+const forApi = (msgs) => msgs.map((m) => {
+  const o = {};
+  for (const k in m) if (k[0] !== '_') o[k] = m[k];
+  if (o.role === 'assistant' && o.tool_calls && o.tool_calls.length && !o.content) delete o.content;
+  return o;
+});
 
 // Commands that always require approval, regardless of mode or "always allow".
 const DANGER = [
@@ -168,7 +174,10 @@ class Agent {
       }
       if (r.usage) this.ui.post({ type: 'usage', usage: r.usage, est: estTokens(this.messages), window: cfg.contextWindow });
 
-      const msg = { role: 'assistant', content: r.content || '' };
+      // Match the gateway's documented shape: a tool-call-only assistant message has no content
+      // field (an empty string can reach Gemini as an empty text part, which it rejects).
+      const msg = { role: 'assistant' };
+      if (r.content || !r.toolCalls.length) msg.content = r.content || '';
       if (r.toolCalls.length) msg.tool_calls = r.toolCalls;
       this.messages.push(msg);
 

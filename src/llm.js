@@ -97,7 +97,7 @@ async function streamChat(opts) {
     extraBody = {}, headers = {}, maxTokens, temperature } = opts;
 
   const body = { model, messages, stream: true, ...extraBody };
-  if (tools && tools.length) body.tools = tools;
+  if (tools && tools.length) { body.tools = tools; if (!('tool_choice' in extraBody)) body.tool_choice = 'auto'; }
   if (maxTokens) body.max_tokens = maxTokens;
   if (typeof temperature === 'number') body.temperature = temperature;
 
@@ -301,7 +301,7 @@ async function probeTools(opts) {
       ...opts,
       messages: [
         { role: 'user', content: 'Call the get_weather tool for the city "Paris". Respond only with the tool call.' },
-        { role: 'assistant', content: r.content || '', tool_calls: r.toolCalls },
+        { role: 'assistant', ...(r.content ? { content: r.content } : {}), tool_calls: r.toolCalls },
         ...r.toolCalls.map((c) => ({ role: 'tool', tool_call_id: c.id, content: c.id === tc.id ? 'Sunny, 21°C' : 'n/a' })),
       ],
       tools: [{ type: 'function', function: { name: 'get_weather', description: 'Get weather for a city', parameters: { type: 'object', properties: { city: { type: 'string' } }, required: ['city'] } } }],
