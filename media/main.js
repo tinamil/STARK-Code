@@ -106,18 +106,100 @@
       <label>API<select id="sApi"><option value="chat">Chat Completions (/chat/completions)</option><option value="responses">Responses (/responses)</option></select></label>
       <label>Base URL<input id="sBase" value="${esc(m.baseUrl || '')}" placeholder="http://localhost:11434/v1"></label>
       <label>API key<input id="sKey" type="password" placeholder="${m.hasKey ? '•••••• (saved, leave blank to keep)' : 'optional for local servers'}"></label>
-      <label>Model<div class="hrow"><input id="sModel" list="sModels" value="${esc(m.model || '')}" placeholder="model name"><button id="sFetch" title="Load models from server">Load</button></div><datalist id="sModels"></datalist></label>
+      <div class="field"><label for="sModel">Model</label>
+        <div class="hrow"><input id="sModel" autocomplete="off" spellcheck="false" role="combobox" aria-autocomplete="list" aria-controls="sList" aria-expanded="false" value="${esc(m.model || '')}" placeholder="Type to filter, or pick from the list">
+        <button id="sToggle" title="Show all models" aria-label="Show all models">▾</button><button id="sFetch" title="Reload models from the server" aria-label="Reload models">↻</button></div>
+        <div id="sList" class="clist" role="listbox" hidden></div>
+        <div id="sHint" class="hint"></div></div>
       <label>Context window (tokens)<input id="sCtx" type="number" value="${m.contextWindow || 32000}"></label>
       <div class="btns"><button id="sTest">Test connection</button><button id="sSave" class="primary">Save</button><span class="sp"></span>${m.hasKey ? '<button id="sClear" title="Delete saved key">Clear key</button>' : ''}<button id="sMore">All settings</button></div>
       <pre id="sOut" hidden></pre>`;
     $('sApi').value = m.apiMode || 'chat';
     const vals = () => ({ apiMode: $('sApi').value, baseUrl: $('sBase').value.trim(), model: $('sModel').value.trim(), apiKey: $('sKey').value, contextWindow: $('sCtx').value });
-    $('sFetch').onclick = () => vscode.postMessage({ type: 'fetchModels', ...vals() });
+    combo.models = []; combo.state = 'loading'; combo.error = '';
+    const loadModels = () => { combo.state = 'loading'; updateHint(); vscode.postMessage({ type: 'fetchModels', ...vals() }); };
+    combo.load = loadModels;
+    $('sFetch').onclick = loadModels;
+    // Reload the list when the endpoint or key changes.
+    $('sBase').addEventListener('change', loadModels);
+    $('sKey').addEventListener('change', loadModels);
+    const inp = $('sModel');
+    inp.addEventListener('focus', () => openList(true));
+    inp.addEventListener('click', () => openList(true));
+    inp.addEventListener('input', () => { combo.all = false; openList(false); updateHint(); });
+    // Close when focus leaves the model field (the list and its buttons keep focus on the input).
+    inp.addEventListener('blur', (e) => { if (!(e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest('.field'))) closeList(); });
+    ['sToggle', 'sFetch'].forEach((id) => $(id).addEventListener('mousedown', (e) => e.preventDefault()));
+    inp.addEventListener('keydown', (e) => {
+      const open = !$('sList').hidden;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (!open) { openList(true); return; }
+        const n = combo.shown.length; if (!n) return;
+        combo.active = (combo.active + (e.key === 'ArrowDown' ? 1 : -1) + n) % n;
+        renderList();
+      } else if (e.key === 'Enter' && open && combo.active >= 0 && combo.shown[combo.active]) {
+        e.preventDefault(); pick(combo.shown[combo.active].id);
+      } else if (e.key === 'Escape' && open) {
+        e.preventDefault(); e.stopPropagation(); closeList();
+      }
+    });
+    $('sToggle').onclick = () => { if ($('sList').hidden) { inp.focus(); openList(true); } else closeList(); };
+    // Keep the list open while it re-renders after a reload.
+    $('sFetch').addEventListener('click', () => inp.focus());
     $('sTest').onclick = () => vscode.postMessage({ type: 'testSetup', ...vals() });
     $('sSave').onclick = () => vscode.postMessage({ type: 'saveSetup', ...vals() });
     if ($('sClear')) $('sClear').onclick = () => vscode.postMessage({ type: 'saveSetup', ...vals(), apiKey: null });
     $('sMore').onclick = () => vscode.postMessage({ type: 'openSettings' });
-    vscode.postMessage({ type: 'fetchModels', ...vals() });
+    loadModels();
+  }
+
+  // ---------- model picker (in-panel list; native <datalist> popups are mispositioned in webviews) ----------
+  const combo = { models: [], shown: [], active: -1, all: true, state: 'idle', error: '', load: null };
+  function sortedModels() {
+    return combo.models.slice().sort((a, b) => ((a.tools === false) - (b.tools === false)) || a.id.localeCompare(b.id));
+  }
+  function openList(showAll) {
+    if (!$('sModel')) return;
+    if (showAll) combo.all = true;
+    combo.active = -1;
+    renderList();
+  }
+  function closeList() {
+    const l = $('sList'); if (!l) return;
+    l.hidden = true; $('sModel').setAttribute('aria-expanded', 'false');
+  }
+  function pick(id) {
+    $('sModel').value = id; closeList(); updateHint();
+  }
+  function renderList() {
+    const l = $('sList'), inp = $('sModel'); if (!l) return;
+    const q = inp.value.trim().toLowerCase();
+    const all = sortedModels();
+    combo.shown = combo.all || !q ? all : all.filter((m) => m.id.toLowerCase().includes(q));
+    if (combo.active >= combo.shown.length) combo.active = combo.shown.length - 1;
+    if (!combo.shown.length) {
+      l.innerHTML = `<div class="cempty">${combo.state === 'loading' ? 'Loading models…' : combo.error ? 'Could not load models. Type the name instead.' : combo.models.length ? 'No matching models. The name you type will be used as-is.' : 'The server listed no models. Type the name instead.'}</div>`;
+    } else {
+      const cur = inp.value.trim();
+      l.innerHTML = combo.shown.map((m, i) => `<div class="copt${i === combo.active ? ' active' : ''}${m.id === cur ? ' current' : ''}" role="option" id="sOpt${i}" data-id="${esc(m.id)}" aria-selected="${i === combo.active}"><span class="cname">${esc(m.id)}</span>${m.tools === false ? '<span class="ctag">no tools</span>' : ''}</div>`).join('');
+      l.querySelectorAll('.copt').forEach((el) => el.addEventListener('mousedown', (e) => { e.preventDefault(); pick(el.dataset.id); }));
+      const act = l.querySelector('.copt.active'); if (act) act.scrollIntoView({ block: 'nearest' });
+    }
+    l.hidden = false;
+    inp.setAttribute('aria-expanded', 'true');
+    inp.setAttribute('aria-activedescendant', combo.active >= 0 ? `sOpt${combo.active}` : '');
+  }
+  function updateHint() {
+    const h = $('sHint'); if (!h) return;
+    const id = $('sModel').value.trim();
+    const m = combo.models.find((x) => x.id === id);
+    h.className = 'hint';
+    if (combo.state === 'loading') h.textContent = 'Loading models from the server…';
+    else if (combo.error) { h.className = 'hint bad'; h.textContent = `Could not load models: ${combo.error}`; }
+    else if (m && m.tools === false) { h.className = 'hint bad'; h.textContent = 'The server says this model does not support tool calling. The agent needs it.'; }
+    else if (id && combo.models.length && !m) { h.className = 'hint warn'; h.textContent = 'Not in the server\'s model list.'; }
+    else h.textContent = combo.models.length ? `${combo.models.length} models available` : '';
   }
   function showHistory(items) {
     panel.dataset.kind = 'history'; panel.hidden = false;
@@ -236,12 +318,11 @@
       }
       case 'setup': showSetup(m); break;
       case 'setupModels': {
-        const dl = $('sModels'); if (!dl) break;
-        dl.innerHTML = m.models.map((x) => {
-          const id = typeof x === 'string' ? x : x.id;
-          return `<option value="${esc(id)}"${x.tools === false ? ' label="no tool calling"' : ''}>`;
-        }).join('');
-        if (m.error && $('sOut')) { $('sOut').hidden = false; $('sOut').textContent = `Could not load models: ${m.error}`; }
+        if (!$('sModel')) break;
+        combo.models = (m.models || []).map((x) => (typeof x === 'string' ? { id: x } : x)).filter((x) => x && x.id);
+        combo.state = 'idle'; combo.error = m.error || '';
+        if (!$('sList').hidden) renderList();
+        updateHint();
         break;
       }
       case 'testResult': {

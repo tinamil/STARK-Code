@@ -289,7 +289,19 @@ class ChatViewProvider {
   }
 }
 
+/** v0.3.0's Setup list could save the literal text "[object Object]" as the model; clear it. */
+async function repairBadModelSetting() {
+  const c = vscode.workspace.getConfiguration('oaiAgent');
+  const info = c.inspect('model') || {};
+  const bad = (v) => typeof v === 'string' && v.includes('[object Object]');
+  if (bad(info.globalValue)) await c.update('model', undefined, vscode.ConfigurationTarget.Global);
+  if (bad(info.workspaceValue)) await c.update('model', undefined, vscode.ConfigurationTarget.Workspace);
+  const models = c.get('models') || [];
+  if (models.some(bad)) await c.update('models', models.filter((m) => !bad(m)), vscode.ConfigurationTarget.Global);
+}
+
 function activate(context) {
+  repairBadModelSetting().catch(() => {});
   const provider = new ChatViewProvider(context);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider('oaiAgent.chat', provider, { webviewOptions: { retainContextWhenHidden: true } }),
