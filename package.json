@@ -3,7 +3,7 @@
   "displayName": "OAI Agent",
   "description": "Autonomous coding agent for any OpenAI-compatible endpoint.",
   "publisher": "local",
-  "version": "0.3.5",
+  "version": "0.4.0",
   "license": "MIT",
   "engines": {
     "vscode": "^1.85.0"
@@ -73,7 +73,7 @@
         },
         "oaiAgent.baseUrl": {
           "type": "string",
-          "default": "http://localhost:11434/v1",
+          "default": "https://api.genai.mil/v1",
           "description": "OpenAI-compatible base URL (the part before /chat/completions)."
         },
         "oaiAgent.model": {

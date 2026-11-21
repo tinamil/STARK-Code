@@ -5,7 +5,7 @@ A coding agent for VS Code that works with any OpenAI-compatible `/chat/completi
 ## Install (offline)
 Download the `.vsix` from [Releases](https://github.com/tinamil/STARK-Code/releases), then run:
 
-    code --install-extension oai-agent-0.3.5.vsix
+    code --install-extension oai-agent-0.4.0.vsix
 Or use the Extensions view: `...` menu → **Install from VSIX...**
 
 ## Setup
@@ -32,6 +32,7 @@ STARK locks API keys 14 days after they're created or unlocked. When that happen
 - If `/models` reports `capabilities.tools: false`, the model picker marks that model "(no tools)".
 
 ## Approvals
+- An edit's approval card shows the change as a diff, plus the agent's one-line explanation of what it does and why. Commands show their explanation too. **Open in diff editor** (Ctrl/Cmd+Enter) opens VS Code's side-by-side view.
 - Enter allows, Esc denies, and Ctrl/Cmd+Enter opens the diff. These work while the panel has focus.
 - From the editor, use Ctrl/Cmd+Alt+Y to allow and Ctrl/Cmd+Alt+N to deny. The agent panel never takes focus from your editor.
 - Type feedback and press Enter to deny with a message. The agent continues using your feedback.
