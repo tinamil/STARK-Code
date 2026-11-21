@@ -5,7 +5,7 @@ A coding agent for VS Code that works with any OpenAI-compatible `/chat/completi
 ## Install (offline)
 Download the `.vsix` from [Releases](https://github.com/tinamil/STARK-Code/releases), then run:
 
-    code --install-extension oai-agent-0.3.4.vsix
+    code --install-extension oai-agent-0.3.5.vsix
 Or use the Extensions view: `...` menu → **Install from VSIX...**
 
 ## Setup
@@ -21,6 +21,9 @@ read_file, write_file, edit_file, list_dir, glob, grep (uses VS Code's bundled r
 
 ## API mode
 `oaiAgent.apiMode` can be `chat` (`/chat/completions`) or `responses` (`/responses`, stateless with `store:false`). Some gateways pass tool definitions through only one of these. **Test connection** checks the selected mode and falls back to the other if tool calling fails.
+
+## Locked or expired keys
+STARK locks API keys 14 days after they're created or unlocked. When that happens, the agent says so and shows an **Unlock API key** button that opens the unlock page from STARK's error response in your browser. Unlock the key, then send "continue". A key that is invalid or expired gets a different message telling you to update it under Setup. The connection test reports both cases.
 
 ## Gateway headers
 - On HTTP 429 the agent waits for the `Retry-After` time, retrying up to 5 times.
