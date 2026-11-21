@@ -1,4 +1,4 @@
-# OAI Agent: user stories (draft)
+# STARK Code: user stories (draft)
 
 Assumption: the main user is a developer on a locked-down machine (no marketplace, possibly no internet) using an internal or self-hosted OpenAI-compatible model.
 

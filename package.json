@@ -1,9 +1,9 @@
 {
   "name": "oai-agent",
-  "displayName": "OAI Agent",
-  "description": "Autonomous coding agent for any OpenAI-compatible endpoint.",
+  "displayName": "STARK Code",
+  "description": "Coding agent for VS Code that works with the STARK API gateway and other OpenAI-compatible endpoints.",
   "publisher": "local",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "license": "MIT",
   "engines": {
     "vscode": "^1.85.0"
@@ -19,7 +19,7 @@
       "activitybar": [
         {
           "id": "oaiAgent",
-          "title": "OAI Agent",
+          "title": "STARK Code",
           "icon": "media/icon.svg"
         }
       ]
@@ -36,27 +36,27 @@
     "commands": [
       {
         "command": "oaiAgent.setApiKey",
-        "title": "OAI Agent: Set API Key"
+        "title": "STARK Code: Set API Key"
       },
       {
         "command": "oaiAgent.newChat",
-        "title": "OAI Agent: New Chat"
+        "title": "STARK Code: New Chat"
       },
       {
         "command": "oaiAgent.stop",
-        "title": "OAI Agent: Stop"
+        "title": "STARK Code: Stop"
       },
       {
         "command": "oaiAgent.approve",
-        "title": "OAI Agent: Allow Pending Action"
+        "title": "STARK Code: Allow Pending Action"
       },
       {
         "command": "oaiAgent.deny",
-        "title": "OAI Agent: Deny Pending Action"
+        "title": "STARK Code: Deny Pending Action"
       }
     ],
     "configuration": {
-      "title": "OAI Agent",
+      "title": "STARK Code",
       "properties": {
         "oaiAgent.apiMode": {
           "type": "string",
@@ -199,5 +199,8 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/tinamil/STARK-Code"
+  },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.js\""
   }
 }
