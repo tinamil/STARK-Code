@@ -209,6 +209,8 @@ class ChatViewProvider {
   async newChat() {
     this.agent.stop();
     this.clearPending();
+    // Let the stopped run finish writing to the old chat before starting a new one.
+    await this.agent.idle();
     await this.saveChat();
     this.agent.reset();
     this.post({ type: 'clear' });

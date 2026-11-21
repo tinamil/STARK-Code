@@ -77,6 +77,13 @@ async function readSse(res, onEvent) {
   return sawData ? null : raw;
 }
 
+function deepMerge(a, b) {
+  if (!a || typeof a !== 'object' || !b || typeof b !== 'object' || Array.isArray(b)) return b;
+  const o = { ...a };
+  for (const k of Object.keys(b)) o[k] = deepMerge(a[k], b[k]);
+  return o;
+}
+
 function finalize(out) {
   out.toolCalls = out.toolCalls.filter(Boolean).filter((t) => t.function.name);
   out.toolCalls.forEach((t, i) => { if (!t.id) t.id = `call_${Date.now()}_${i}`; });
@@ -84,17 +91,30 @@ function finalize(out) {
 }
 
 // ---------------- /chat/completions ----------------
+const NO_STREAM_OPTIONS = new Set();   // chat URLs that rejected stream_options
 async function streamChat(opts) {
   const { baseUrl, apiKey, model, messages, tools, signal, onText, onReasoning,
     extraBody = {}, headers = {}, maxTokens, temperature } = opts;
 
   const body = { model, messages, stream: true, ...extraBody };
-  if (tools && tools.length) body.tools = tools;
+  if (tools && tools.length) { body.tools = tools; if (!('tool_choice' in extraBody)) body.tool_choice = 'auto'; }
   if (maxTokens) body.max_tokens = maxTokens;
   if (typeof temperature === 'number') body.temperature = temperature;
 
   const url = baseUrl.replace(/\/+$/, '') + '/chat/completions';
-  const res = await post(url, body, { apiKey, headers, signal });
+  // Ask for token usage in the final stream chunk. Strict gateways may reject the unknown field:
+  // then retry once without it and remember not to send it to this server again.
+  const useStreamOptions = !NO_STREAM_OPTIONS.has(url) && !('stream_options' in extraBody);
+  if (useStreamOptions) body.stream_options = { include_usage: true };
+  let res;
+  try {
+    res = await post(url, body, { apiKey, headers, signal });
+  } catch (e) {
+    if (!useStreamOptions || !/^HTTP (400|422)\b/.test(e.message)) throw e;
+    delete body.stream_options;
+    res = await post(url, body, { apiKey, headers, signal });
+    NO_STREAM_OPTIONS.add(url);
+  }
 
   const out = { content: '', reasoning: '', toolCalls: [], finishReason: null, usage: null, meta: readMeta(res.headers) };
   const applyMessage = (m) => {
@@ -110,6 +130,12 @@ async function streamChat(opts) {
       if (fn.name && fn.name !== cur.function.name) cur.function.name += fn.name;
       if (fn.arguments != null) {
         cur.function.arguments += typeof fn.arguments === 'string' ? fn.arguments : JSON.stringify(fn.arguments);
+      }
+      // Keep provider-specific fields (e.g. Gemini 3's extra_content.google.thought_signature).
+      // They must be sent back unchanged on the next request or the provider rejects the call.
+      for (const k of Object.keys(tc)) {
+        if (k === 'index' || k === 'id' || k === 'type' || k === 'function') continue;
+        cur[k] = deepMerge(cur[k], tc[k]);
       }
     }
   };
@@ -266,7 +292,28 @@ async function probeTools(opts) {
   if (tc && tc.function.name === 'get_weather') {
     try { ok = /paris/i.test(JSON.parse(tc.function.arguments || '{}').city || ''); } catch { /* bad json */ }
   }
-  return { ok, secs: ((Date.now() - t0) / 1000).toFixed(1), why: tc ? 'returned a malformed tool call' : 'answered in text instead of calling the tool', meta: r.meta };
+  const res = { ok, secs: ((Date.now() - t0) / 1000).toFixed(1), why: tc ? 'returned a malformed tool call' : 'answered in text instead of calling the tool', meta: r.meta };
+  if (!ok) return res;
+  // Second step: send the tool result back, as the agent does on every step. This catches gateways
+  // that drop tool messages and providers that need fields echoed back (e.g. Gemini thought signatures).
+  try {
+    const r2 = await complete({
+      ...opts,
+      messages: [
+        { role: 'user', content: 'Call the get_weather tool for the city "Paris". Respond only with the tool call.' },
+        { role: 'assistant', ...(r.content ? { content: r.content } : {}), tool_calls: r.toolCalls },
+        ...r.toolCalls.map((c) => ({ role: 'tool', tool_call_id: c.id, content: c.id === tc.id ? 'Sunny, 21°C' : 'n/a' })),
+      ],
+      tools: [{ type: 'function', function: { name: 'get_weather', description: 'Get weather for a city', parameters: { type: 'object', properties: { city: { type: 'string' } }, required: ['city'] } } }],
+      signal: AbortSignal.timeout(90000),
+    });
+    res.roundTrip = !!(r2.content || r2.toolCalls.length);
+    if (!res.roundTrip) res.roundTripError = 'the model returned an empty reply after the tool result';
+  } catch (e) {
+    res.roundTrip = false; res.roundTripError = e.message.slice(0, 300);
+  }
+  res.ok = res.roundTrip;
+  return res;
 }
 
 /** Checks reachability, chat, and tool calling. Returns { ok, lines, models, suggestMode? }. */
@@ -290,20 +337,24 @@ async function testConnection(opts) {
     const p = await probeTools(opts);
     meta = p.meta || {};
     lines.push(`✓ ${ep} works (${p.secs}s)`);
-    if (p.ok) lines.push('✓ Tool calling works');
+    if (p.ok) lines.push('✓ Tool calling works (call and result round trip)');
     else {
-      lines.push(`✗ Tool calling failed via ${ep}: the model ${p.why}.`);
+      if (p.roundTrip === false) {
+        lines.push('✓ The model calls tools');
+        lines.push(`✗ Sending the tool result back via ${ep} failed: ${p.roundTripError}. The agent can't take more than one step until this works.`);
+      } else lines.push(`✗ Tool calling failed via ${ep}: the model ${p.why}.`);
       // Try the other API before giving up — some gateways only pass tools through one of them.
       const other = mode === 'chat' ? 'responses' : 'chat';
+      const otherEp = other === 'responses' ? '/responses' : '/chat/completions';
       try {
         const q = await probeTools({ ...opts, apiMode: other });
         if (q.ok) {
-          lines.push(`✓ Tool calling works via ${other === 'responses' ? '/responses' : '/chat/completions'}. Switch "API" to "${other}".`);
+          lines.push(`✓ Tool calling works via ${otherEp}. Switch "API" to "${other}".`);
           if (meta.keyExpiringSoon) lines.push(`⚠ API key expires ${meta.keyExpiresAt || 'within 7 days'}`);
           return { ok: false, lines, models, suggestMode: other };
         }
-        lines.push(`✗ Also failed via ${other}. The model or gateway may not support tool calling.`);
-      } catch (e) { lines.push(`• ${other} API not usable: ${e.message.slice(0, 200)}`); }
+        lines.push(`✗ Also failed via ${otherEp}${q.roundTripError ? ` (${q.roundTripError.slice(0, 150)})` : ''}. The model or gateway may not support multi-step tool calling.`);
+      } catch (e) { lines.push(`• ${otherEp} not usable: ${e.message.slice(0, 200)}`); }
     }
     if (meta.creditsRemaining !== undefined) lines.push(`• Credits today: ${meta.creditsRemaining}${meta.creditsLimit !== undefined ? ` / ${meta.creditsLimit}` : ''} remaining`);
     if (meta.keyExpiringSoon) lines.push(`⚠ API key expires ${meta.keyExpiresAt || 'within 7 days'}`);
