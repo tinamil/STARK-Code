@@ -10,7 +10,7 @@ const PROPOSED_SCHEME = 'oai-agent-proposed';
 function getConfig() {
   const c = vscode.workspace.getConfiguration('oaiAgent');
   const keys = ['apiMode', 'baseUrl', 'model', 'models', 'contextWindow', 'maxTokens', 'temperature', 'maxSteps', 'approvalMode',
-    'autoApproveCommands', 'autoApproveReadOnlyCommands', 'shell', 'commandTimeoutMs', 'maxToolOutputChars', 'extraHeaders', 'extraBody', 'customInstructions'];
+    'autoApproveCommands', 'autoApproveReadOnlyCommands', 'autoApproveReadOnlyScripts', 'shell', 'commandTimeoutMs', 'maxToolOutputChars', 'extraHeaders', 'extraBody', 'customInstructions'];
   const o = {};
   for (const k of keys) o[k] = c.get(k);
   return o;
@@ -103,8 +103,8 @@ class ChatViewProvider {
 <div id="log"></div>
 <div id="todos" hidden></div>
 <div id="bottom">
-<textarea id="input" rows="3" placeholder="Ask the agent… (Enter to send, Shift+Enter for newline)"></textarea>
-<div id="row"><label><input type="checkbox" id="ctx" checked> Include file/selection</label><span class="sp"></span><span id="usage"></span><button id="send">Send</button></div>
+<textarea id="input" rows="3" placeholder="Ask the agent… (Enter to send, Shift+Enter for newline, /compact to summarize)"></textarea>
+<div id="row"><label><input type="checkbox" id="ctx" checked> Include file/selection</label><span class="sp"></span><span id="usage"></span><button id="btnCompact" title="Summarize the conversation to free up context. Tip: type /compact followed by what to keep.">Compact</button><button id="send">Send</button></div>
 </div>
 <script nonce="${nonce}" src="${js}"></script></body></html>`;
 
@@ -127,6 +127,7 @@ class ChatViewProvider {
         break;
       }
       case 'stop': this.agent.stop(); break;
+      case 'compact': if (await this.agent.compactNow((m.focus || '').trim())) await this.saveChat(); break;
       case 'new': await this.newChat(); break;
       case 'setModel': await vscode.workspace.getConfiguration('oaiAgent').update('model', m.model, vscode.ConfigurationTarget.Global); break;
       case 'approve': this.resolveApproval(m.id, { decision: m.decision, feedback: m.feedback }); break;
