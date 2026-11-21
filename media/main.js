@@ -2,7 +2,7 @@
   const vscode = acquireVsCodeApi();
   const $ = (id) => document.getElementById(id);
   const log = $('log'), input = $('input'), send = $('send'), panel = $('panel'), modelSel = $('model');
-  let busy = false, expiryWarned = false, ctxText = '', creditText = '', cur = null, curText = '', curReasoning = null, renderPending = false;
+  let busy = false, expiryWarned = false, budgetWarned = false, limitsTip = '', ctxText = '', creditText = '', cur = null, curText = '', curReasoning = null, renderPending = false;
   const toolEls = new Map();
   const isMac = navigator.platform.toUpperCase().includes('MAC');
 
@@ -345,11 +345,22 @@
       }
       case 'meta': {
         const x = m.meta;
+        const fmt = (n) => Number(n).toLocaleString();
+        const inS = (s) => (s >= 3600 ? `${Math.floor(s / 3600)}h ${Math.round((s % 3600) / 60)}m` : s >= 60 ? `${Math.round(s / 60)}m` : `${Math.round(s)}s`);
         if (x.creditsRemaining !== undefined) {
-          creditText = `${x.creditsRemaining.toLocaleString()}${x.creditsLimit !== undefined ? ` / ${x.creditsLimit.toLocaleString()}` : ''} credits`;
+          creditText = `${fmt(x.creditsRemaining)}${x.creditsLimit !== undefined ? ` / ${fmt(x.creditsLimit)}` : ''} credits`;
           $('usage').textContent = [ctxText, creditText].filter(Boolean).join(' · ');
-          $('usage').title = 'Daily credits remaining (from gateway headers)';
+          if (x.creditsLimit && x.creditsRemaining < x.creditsLimit * 0.1 && !budgetWarned) {
+            budgetWarned = true;
+            add('info warn', esc(`⚠ Less than 10% of today's credits left (${fmt(x.creditsRemaining)} of ${fmt(x.creditsLimit)})${x.creditsResetS !== undefined ? `; they reset in ${inS(x.creditsResetS)}` : ''}. Long conversations use the most; /compact or a new chat uses less.`));
+          }
         }
+        const tip = [
+          x.creditsRemaining !== undefined ? `Daily credits: ${fmt(x.creditsRemaining)}${x.creditsLimit !== undefined ? ` of ${fmt(x.creditsLimit)}` : ''} left${x.creditsResetS !== undefined ? `, resets in ${inS(x.creditsResetS)}` : ''}` : '',
+          x.tokensRemaining !== undefined ? `Tokens this minute: ${fmt(x.tokensRemaining)}${x.tokensLimit !== undefined ? ` of ${fmt(x.tokensLimit)}` : ''} left` : '',
+          x.requestsRemaining !== undefined ? `Requests this minute: ${fmt(x.requestsRemaining)}${x.requestsLimit !== undefined ? ` of ${fmt(x.requestsLimit)}` : ''} left` : '',
+        ].filter(Boolean).join('\n');
+        if (tip) { limitsTip = tip; $('usage').title = tip; }
         if (x.keyExpiringSoon && !expiryWarned) {
           expiryWarned = true;
           add('info warn', esc(`⚠ Your API key expires ${x.keyExpiresAt ? new Date(x.keyExpiresAt).toLocaleString() : 'within 7 days'}. Renew it, then update it under Setup.`));

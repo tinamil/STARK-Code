@@ -46,6 +46,9 @@ class Agent {
   constructor({ getConfig, getApiKey, getRoot, ui, io }) {
     this.getConfig = getConfig; this.getApiKey = getApiKey; this.getRoot = getRoot; this.ui = ui;
     this.io = io || textfile;
+    this.limits = null;       // latest gateway rate-limit headers (per key, kept across chats)
+    this.limitsAt = 0;
+    this.capNoticeShown = false;
     this.reset();
   }
 
@@ -143,6 +146,7 @@ class Agent {
     for (let attempt = 0; ; attempt++) {
       let streamed = false;
       try {
+        await this.throttle(estTokens(messages) + (withTools ? 1300 : 0));
         const r = await complete({
           apiMode: cfg.apiMode, baseUrl: cfg.baseUrl, apiKey, model: cfg.model, messages: forApi(messages),
           tools: withTools ? toolDefs() : undefined,
@@ -152,9 +156,13 @@ class Agent {
           extraBody: cfg.extraBody, headers: cfg.extraHeaders,
           maxTokens: cfg.maxTokens, temperature: cfg.temperature,
         });
-        if (r.meta && Object.keys(r.meta).length) this.ui.post({ type: 'meta', meta: r.meta });
+        if (r.meta && Object.keys(r.meta).length) { this.updateLimits(r.meta); this.ui.post({ type: 'meta', meta: r.meta }); }
         return r;
       } catch (e) {
+        if (e.meta) this.updateLimits(e.meta);
+        // Larger than the per-minute token limit: retrying can never succeed; the caller compacts instead.
+        const tpm = this.limits && this.limits.tokensLimit;
+        if (tpm && estTokens(messages) > tpm * 0.9 && /^HTTP 429\b/.test(e.message || '')) { e.tooLarge = true; throw e; }
         const maxAttempts = 5;
         if (this.abort.signal.aborted || streamed || !e.retryable || attempt >= maxAttempts) throw e;
         // Honor Retry-After (rate limits); otherwise exponential backoff.
@@ -186,6 +194,11 @@ class Agent {
         if (signal.aborted && partial) this.messages.push({ role: 'assistant', content: partial + '\n[interrupted by user]' });
         // The model's real limit is below the configured window: learn a smaller limit for this chat,
         // summarize, and retry the step (at most a few times per chat).
+        if (!signal.aborted && !partial && e.tooLarge && (this.overflowRetries = (this.overflowRetries || 0) + 1) <= 3) {
+          // effectiveWindow() now caps to the per-minute limit, so maybeCompact() shrinks the history.
+          step--;
+          continue;
+        }
         if (!signal.aborted && !partial && isContextOverflow(e) && (this.overflowRetries = (this.overflowRetries || 0) + 1) <= 3) {
           const est = estTokens(this.messages);
           this.learnedWindow = Math.max(8000, Math.floor(Math.min(est, this.effectiveWindow(cfg)) * 0.8));
@@ -348,9 +361,56 @@ class Agent {
     }
   }
 
+  /**
+   * The context size the agent actually works within: the configured window, lowered by a limit
+   * learned from a context-overflow error, and kept under the gateway's tokens-per-minute limit
+   * (a single request larger than that could never be sent).
+   */
   effectiveWindow(cfg) {
-    const w = cfg.contextWindow || 1000000;
-    return this.learnedWindow ? Math.min(w, this.learnedWindow) : w;
+    let w = cfg.contextWindow || 1000000;
+    if (this.learnedWindow) w = Math.min(w, this.learnedWindow);
+    const tpm = this.limits && this.limits.tokensLimit;
+    if (tpm > 0 && tpm * 0.9 < w) {
+      w = Math.floor(tpm * 0.9);
+      if (!this.capNoticeShown) {
+        this.capNoticeShown = true;
+        this.ui.post({ type: 'info', text: `Using a ${Math.round(w / 1000)}k-token context window to stay under the gateway's ${Math.round(tpm / 1000)}k tokens-per-minute limit.` });
+      }
+    }
+    return w;
+  }
+
+  updateLimits(meta) {
+    const keys = ['tokensLimit', 'tokensRemaining', 'tokensResetS', 'requestsLimit', 'requestsRemaining', 'requestsResetS', 'creditsLimit', 'creditsRemaining', 'creditsResetS'];
+    if (!keys.some((k) => meta[k] !== undefined)) return;
+    this.limits = { ...(this.limits || {}), ...meta };
+    this.limitsAt = Date.now();
+  }
+
+  /**
+   * Wait for the per-minute window to reset when the next request would exceed what's left of it,
+   * instead of sending it and getting a 429. Uses the most recent rate-limit headers.
+   */
+  async throttle(estimate) {
+    const L = this.limits;
+    if (!L) return;
+    const elapsed = (Date.now() - this.limitsAt) / 1000;
+    let wait = 0, why = '';
+    if (L.tokensRemaining !== undefined && L.tokensResetS > elapsed && estimate > L.tokensRemaining && !(L.tokensLimit && estimate > L.tokensLimit)) {
+      wait = L.tokensResetS - elapsed; why = 'tokens-per-minute';
+    }
+    if (L.requestsRemaining !== undefined && L.requestsRemaining <= 0 && L.requestsResetS > elapsed && L.requestsResetS - elapsed > wait) {
+      wait = L.requestsResetS - elapsed; why = 'requests-per-minute';
+    }
+    if (wait <= 0) return;
+    wait = Math.min(wait + 0.5, 65);
+    this.ui.post({ type: 'info', text: `Waiting ${Math.ceil(wait)}s for the gateway's ${why} limit to reset…` });
+    await new Promise((resolve) => {
+      const t = setTimeout(resolve, wait * 1000);
+      this.abort.signal.addEventListener('abort', () => { clearTimeout(t); resolve(); }, { once: true });
+    });
+    if (this.abort.signal.aborted) throw new Error('aborted');
+    this.limits = { ...L, tokensRemaining: undefined, requestsRemaining: undefined };   // window reset; wait for fresh headers
   }
 
   async maybeCompact(cfg) {
