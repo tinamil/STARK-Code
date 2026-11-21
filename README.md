@@ -5,7 +5,7 @@ A coding agent for VS Code that works with any OpenAI-compatible `/chat/completi
 ## Install (offline)
 Download the `.vsix` from [Releases](https://github.com/tinamil/STARK-Code/releases), then run:
 
-    code --install-extension oai-agent-0.3.3.vsix
+    code --install-extension oai-agent-0.3.4.vsix
 Or use the Extensions view: `...` menu → **Install from VSIX...**
 
 ## Setup
@@ -15,6 +15,9 @@ Switch models from the dropdown at the top. It lists models the server reports p
 
 ## Tools
 read_file, write_file, edit_file, list_dir, glob, grep (uses VS Code's bundled ripgrep), run_command, web_fetch, todo_write.
+
+## Context window
+`oaiAgent.contextWindow` defaults to 1,000,000 tokens (Gemini 3's size). When the conversation reaches about 70% of it, older messages are summarized. A larger window keeps more detail but uses more tokens, because each step resends the conversation. Lower it under **Setup** to save credits. If a model's real limit is smaller, the agent notices the server's error, uses a smaller limit for that chat, summarizes and retries.
 
 ## API mode
 `oaiAgent.apiMode` can be `chat` (`/chat/completions`) or `responses` (`/responses`, stateless with `store:false`). Some gateways pass tool definitions through only one of these. **Test connection** checks the selected mode and falls back to the other if tool calling fails.

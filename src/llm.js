@@ -110,7 +110,9 @@ async function streamChat(opts) {
   try {
     res = await post(url, body, { apiKey, headers, signal });
   } catch (e) {
-    if (!useStreamOptions || !/^HTTP (400|422)\b/.test(e.message)) throw e;
+    // Retry only when the error points at the field itself, not at any 400 (e.g. context overflow).
+    if (!useStreamOptions || !/^HTTP (400|422)\b/.test(e.message) ||
+      !/stream_options|include_usage|extra (inputs|fields)|unrecognized|unknown (field|parameter|argument)|additional propert/i.test(e.message)) throw e;
     delete body.stream_options;
     res = await post(url, body, { apiKey, headers, signal });
     NO_STREAM_OPTIONS.add(url);
