@@ -3,6 +3,7 @@ const path = require('path');
 const { complete } = require('./llm');
 const { toolDefs, getTool, truncate, resolvePath } = require('./tools');
 const { buildSystemPrompt } = require('./prompt');
+const { diffLines } = require('./diff');
 
 const estTokens = (msgs) => Math.ceil(JSON.stringify(msgs).length / 3.5);
 // Strip internal fields (prefixed with _) before sending to the API.
@@ -273,12 +274,16 @@ class Agent {
       if (tool.category === 'edit' && prep.path && fs.existsSync(prep.path) && !this.readFiles.has(prep.path)) {
         return done(false, `Error: read ${args.path} with read_file before modifying it.`);
       }
+      // Diff of the proposed change, shown in the approval card and in the tool row.
+      const diff = typeof prep.newContent === 'string' ? diffLines(prep.oldContent, prep.newContent) : null;
+      if (diff) prep.summary = `${prep.summary} (+${diff.adds} −${diff.dels})`;
+      const explanation = typeof args.explanation === 'string' ? args.explanation.slice(0, 500) : '';
       const need = this.needsApproval(tool, args, cfg, prep, root);
       if (need) {
         const canDiff = typeof prep.newContent === 'string';
         if (canDiff) this.ui.registerProposal(id, { path: prep.path, newContent: prep.newContent });
         const summary = prep.summary || (tool.category === 'read' ? `${name} ${args.path}` : name);
-        const ans = await this.ui.approve({ id, name, summary, canDiff, warning: need.warning, allowAlways: need.allowAlways });
+        const ans = await this.ui.approve({ id, name, summary, canDiff, warning: need.warning, allowAlways: need.allowAlways, explanation, diff });
         if (this.abort.signal.aborted) return done(false, 'Interrupted by user.');
         if (ans.decision === 'always' && need.allowAlways) this.sessionAllowed.add(need.allowKey || name);
         if (ans.decision === 'no') {
@@ -300,6 +305,7 @@ class Agent {
         this.checkpoints.push({ turn: this.turn, path: prep.path, before });
       }
       const out = await tool.run(args, ctx, prep);
+      if (diff) this.ui.post({ type: 'toolDiff', id, diff, summary: prep.summary, explanation });
       return done(true, out);
     } catch (e) {
       if (this.abort.signal.aborted) return done(false, 'Interrupted by user.');

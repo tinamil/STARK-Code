@@ -98,6 +98,21 @@
     else if (e.key === 'Enter' && e.target === document.body) { e.preventDefault(); answer(box, 'yes'); }
   });
 
+  /** Unified diff from src/diff.js: {adds, dels, hunks:[{oldStart,newStart,lines:[[op,text]]}], truncated}. */
+  function renderDiff(d) {
+    if (!d.hunks.length) return '<div class="diff"><div class="hunk">No changes</div></div>';
+    const rows = d.hunks.map((h) => {
+      let o = h.oldStart, n = h.newStart;
+      const lines = h.lines.map(([op, t]) => {
+        const cls = op === '+' ? 'add' : op === '-' ? 'del' : 'ctx';
+        const num = op === '+' ? n++ : op === '-' ? o++ : (o++, n++);
+        return `<div class="dl ${cls}"><span class="ln">${num}</span><span class="sig">${op === ' ' ? ' ' : op === '-' ? '−' : '+'}</span><span class="tx">${esc(t) || ' '}</span></div>`;
+      }).join('');
+      return `<div class="hunk">Line ${h.newStart}</div>${lines}`;
+    }).join('');
+    return `<div class="diff">${rows}${d.truncated ? '<div class="hunk">More changes not shown. Open the full diff.</div>' : ''}</div>`;
+  }
+
   /** Adds an "Unlock API key" button (opens the gateway's unlock page in the browser) and shows the URL. */
   function unlockButton(container, url) {
     const row = document.createElement('div');
@@ -113,7 +128,7 @@
     panel.dataset.kind = 'setup'; panel.hidden = false;
     panel.innerHTML = `<div class="ptitle">${m.first ? 'Welcome. Connect a model to get started.' : 'Connection'}</div>
       <label>API<select id="sApi"><option value="chat">Chat Completions (/chat/completions)</option><option value="responses">Responses (/responses)</option></select></label>
-      <label>Base URL<input id="sBase" value="${esc(m.baseUrl || '')}" placeholder="http://localhost:11434/v1"></label>
+      <label>Base URL<input id="sBase" value="${esc(m.baseUrl || '')}" placeholder="https://api.genai.mil/v1"></label>
       <label>API key<input id="sKey" type="password" placeholder="${m.hasKey ? '•••••• (saved, leave blank to keep)' : 'optional for local servers'}"></label>
       <div class="field"><label for="sModel">Model</label>
         <div class="hrow"><input id="sModel" autocomplete="off" spellcheck="false" role="combobox" aria-autocomplete="list" aria-controls="sList" aria-expanded="false" value="${esc(m.model || '')}" placeholder="Type to filter, or pick from the list">
@@ -283,15 +298,28 @@
         box.className = 'approval' + (m.warning ? ' danger' : '');
         box.dataset.id = m.id;
         const mod = isMac ? '⌘' : 'Ctrl';
-        box.innerHTML = `<div class="q">Allow <b>${esc(m.name)}</b>?</div>${m.warning ? `<div class="warn">⚠ ${esc(m.warning)}</div>` : ''}<pre>${esc(m.summary)}</pre>
+        const title = m.name === 'run_command' ? 'Run this command?' : m.name === 'web_fetch' ? 'Fetch this URL?' : m.diff ? `${esc(m.summary)}?` : `Allow <b>${esc(m.name)}</b>?`;
+        box.innerHTML = `<div class="q">${title}</div>${m.explanation ? `<div class="why">${esc(m.explanation)}</div>` : ''}${m.warning ? `<div class="warn">⚠ ${esc(m.warning)}</div>` : ''}
+          ${m.diff ? renderDiff(m.diff) : `<pre>${esc(m.summary)}</pre>`}
           <input class="fb" placeholder="Feedback (Enter denies with this message)">
-          <div class="btns"><button data-a="yes" class="primary">Allow</button>${m.canDiff ? '<button data-a="diff">View diff</button>' : ''}${m.allowAlways ? `<button data-a="always">${m.warning === 'This reads outside the workspace.' ? 'Always allow outside reads' : `Always allow ${esc(m.name)}`}</button>` : ''}<button data-a="no" class="deny">Deny</button></div>
+          <div class="btns"><button data-a="yes" class="primary">Allow</button>${m.canDiff ? '<button data-a="diff">Open in diff editor</button>' : ''}${m.allowAlways ? `<button data-a="always">${m.warning === 'This reads outside the workspace.' ? 'Always allow outside reads' : `Always allow ${esc(m.name)}`}</button>` : ''}<button data-a="no" class="deny">Deny</button></div>
           <div class="keys">Enter allow · Esc deny${m.canDiff ? ` · ${mod}+Enter diff` : ''} · from editor: ${mod}+Alt+Y / ${mod}+Alt+N</div>`;
         box.addEventListener('click', (e) => { const a = e.target.dataset && e.target.dataset.a; if (a) answer(box, a); });
         d.appendChild(box);
         log.scrollTop = log.scrollHeight;
         // Only take focus if the panel already has it — never steal focus from the editor.
         if (document.hasFocus() && pendingCards()[0] === box) box.querySelector('[data-a="yes"]').focus();
+        break;
+      }
+      case 'toolDiff': {
+        const d = toolEls.get(m.id);
+        if (!d) break;
+        d.querySelector('.arg').textContent = m.summary.replace(/^(Edit|Create|Overwrite) /, '');
+        const det = d.querySelector('details');
+        const args = det.querySelector('.args'); if (args) args.remove();
+        const box = document.createElement('div');
+        box.innerHTML = (m.explanation ? `<div class="why">${esc(m.explanation)}</div>` : '') + renderDiff(m.diff);
+        det.insertBefore(box, det.querySelector('.out'));
         break;
       }
       case 'approvalDone': {

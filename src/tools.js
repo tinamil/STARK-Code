@@ -122,11 +122,13 @@ const TOOLS = [
     description: 'Create a new file or completely overwrite an existing one. Creates parent directories. Prefer edit_file for modifying existing files.',
     parameters: { type: 'object', properties: {
       path: { type: 'string' }, content: { type: 'string', description: 'Full file content' },
+      explanation: { type: 'string', description: 'One short sentence for the user: what this change does and why. Shown in the approval prompt.' },
     }, required: ['path', 'content'] },
     async prepare(a, ctx) {
       const p = resolvePath(ctx.root, a.path);
       const exists = fs.existsSync(p);
-      return { path: p, newContent: a.content, summary: `${exists ? 'Overwrite' : 'Create'} ${rel(ctx.root, p)}` };
+      const oldContent = exists ? await fsp.readFile(p, 'utf8') : null;
+      return { path: p, oldContent, newContent: a.content, summary: `${exists ? 'Overwrite' : 'Create'} ${rel(ctx.root, p)}` };
     },
     async run(a, ctx, prep) {
       await fsp.mkdir(path.dirname(prep.path), { recursive: true });
@@ -143,11 +145,13 @@ const TOOLS = [
       old_string: { type: 'string', description: 'Exact text to replace (no line-number prefixes)' },
       new_string: { type: 'string', description: 'Replacement text' },
       replace_all: { type: 'boolean', description: 'Replace every occurrence' },
+      explanation: { type: 'string', description: 'One short sentence for the user: what this change does and why. Shown in the approval prompt.' },
     }, required: ['path', 'old_string', 'new_string'] },
     async prepare(a, ctx) {
       const p = resolvePath(ctx.root, a.path);
       if (!fs.existsSync(p)) throw new Error(`File not found: ${a.path}. Use write_file to create it.`);
       let text = await fsp.readFile(p, 'utf8');
+      const oldContent = text;
       const crlf = text.includes('\r\n');
       if (crlf) text = text.replace(/\r\n/g, '\n');
       const oldS = a.old_string.replace(/\r\n/g, '\n'), newS = a.new_string.replace(/\r\n/g, '\n');
@@ -158,7 +162,7 @@ const TOOLS = [
       if (count > 1 && !a.replace_all) throw new Error(`old_string occurs ${count} times. Add more context to make it unique, or set replace_all.`);
       let out = a.replace_all ? text.split(oldS).join(newS) : text.replace(oldS, () => newS);
       if (crlf) out = out.replace(/\n/g, '\r\n');
-      return { path: p, newContent: out, count: a.replace_all ? count : 1, summary: `Edit ${rel(ctx.root, p)}` };
+      return { path: p, oldContent, newContent: out, count: a.replace_all ? count : 1, summary: `Edit ${rel(ctx.root, p)}` };
     },
     async run(a, ctx, prep) {
       await fsp.writeFile(prep.path, prep.newContent, 'utf8');
@@ -261,6 +265,7 @@ const TOOLS = [
       command: { type: 'string' },
       cwd: { type: 'string', description: 'Working directory (default: workspace root)' },
       timeout_ms: { type: 'integer', description: 'Timeout in ms (default from settings)' },
+      explanation: { type: 'string', description: 'One short sentence for the user: what this command does and why. Shown in the approval prompt.' },
     }, required: ['command'] },
     async prepare(a, ctx) { return { summary: a.command, command: a.command }; },
     async run(a, ctx) {
