@@ -237,7 +237,10 @@
       case 'setup': showSetup(m); break;
       case 'setupModels': {
         const dl = $('sModels'); if (!dl) break;
-        dl.innerHTML = m.models.map((x) => `<option value="${esc(x)}">`).join('');
+        dl.innerHTML = m.models.map((x) => {
+          const id = typeof x === 'string' ? x : x.id;
+          return `<option value="${esc(id)}"${x.tools === false ? ' label="no tool calling"' : ''}>`;
+        }).join('');
         if (m.error && $('sOut')) { $('sOut').hidden = false; $('sOut').textContent = `Could not load models: ${m.error}`; }
         break;
       }
