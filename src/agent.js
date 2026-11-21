@@ -25,6 +25,9 @@ const DANGER = [
   /\bdocker\s+(system\s+prune|rm|rmi|volume\s+rm)\b/, /\b(curl|wget)\b.*\|\s*(sudo\s+)?(ba|z)?sh\b/,
 ];
 const isDangerous = (cmd) => DANGER.some((re) => re.test(cmd));
+// Errors servers return when the request is larger than the model's context window.
+const isContextOverflow = (e) => /^HTTP (400|413|422)\b/.test(e.message || '') &&
+  /context[ _-]?(length|window)|maximum context|too many (input )?tokens|exceeds? the (maximum|max|context)|input (is )?too long|prompt is too long|token limit|max_?tokens.*exceed|request too large/i.test(e.message);
 const isOutside = (root, p) => { const r = path.relative(root, p); return r === '..' || r.startsWith('..' + path.sep) || path.isAbsolute(r); };
 
 /**
@@ -44,6 +47,7 @@ class Agent {
     this.chatId = `${Date.now()}`;
     this.created = Date.now();
     this.readFiles = new Set();
+    this.learnedWindow = 0;    // lower limit discovered from a context-overflow error, for this chat
     this.sessionAllowed = new Set();
     this.busy = false;
     this.abort = null;
@@ -168,11 +172,21 @@ class Agent {
           (t) => this.ui.post({ type: 'reasoning', text: t }));
       } catch (e) {
         if (signal.aborted && partial) this.messages.push({ role: 'assistant', content: partial + '\n[interrupted by user]' });
+        // The model's real limit is below the configured window: learn a smaller limit for this chat,
+        // summarize, and retry the step (at most a few times per chat).
+        if (!signal.aborted && !partial && isContextOverflow(e) && (this.overflowRetries = (this.overflowRetries || 0) + 1) <= 3) {
+          const est = estTokens(this.messages);
+          this.learnedWindow = Math.max(8000, Math.floor(Math.min(est, this.effectiveWindow(cfg)) * 0.8));
+          this.ui.post({ type: 'info', text: `The model's context limit is smaller than the configured ${Math.round((cfg.contextWindow || 0) / 1000)}k. Using about ${Math.round(this.learnedWindow / 1000)}k for this chat and summarizing earlier messages.` });
+          step--;
+          continue;
+        }
         throw e;
       } finally {
         this.ui.post({ type: 'assistantEnd' });
       }
-      if (r.usage) this.ui.post({ type: 'usage', usage: r.usage, est: estTokens(this.messages), window: cfg.contextWindow });
+      this.overflowRetries = 0;
+      if (r.usage) this.ui.post({ type: 'usage', usage: r.usage, est: estTokens(this.messages), window: this.effectiveWindow(cfg) });
 
       // Match the gateway's documented shape: a tool-call-only assistant message has no content
       // field (an empty string can reach Gemini as an empty text part, which it rejects).
@@ -293,8 +307,13 @@ class Agent {
     }
   }
 
+  effectiveWindow(cfg) {
+    const w = cfg.contextWindow || 1000000;
+    return this.learnedWindow ? Math.min(w, this.learnedWindow) : w;
+  }
+
   async maybeCompact(cfg) {
-    const window = cfg.contextWindow || 32000;
+    const window = this.effectiveWindow(cfg);
     if (estTokens(this.messages) < window * 0.7) return;
 
     // Keep a recent tail (~30% of window) starting at an assistant/user boundary so tool pairs stay intact.

@@ -156,7 +156,8 @@ class ChatViewProvider {
         await c.update('baseUrl', m.baseUrl, vscode.ConfigurationTarget.Global);
         await c.update('model', m.model, vscode.ConfigurationTarget.Global);
         if (m.apiMode) await c.update('apiMode', m.apiMode, vscode.ConfigurationTarget.Global);
-        if (m.contextWindow) await c.update('contextWindow', Number(m.contextWindow), vscode.ConfigurationTarget.Global);
+        // Only store the context window when it differs, so the default can change in later versions.
+        if (m.contextWindow && Number(m.contextWindow) !== c.get('contextWindow')) await c.update('contextWindow', Number(m.contextWindow), vscode.ConfigurationTarget.Global);
         if (m.apiKey === null) await this.context.secrets.delete(SECRET_KEY);
         else if (m.apiKey) await this.context.secrets.store(SECRET_KEY, m.apiKey);
         this.post({ type: 'panelClose' });
@@ -302,8 +303,17 @@ async function repairBadModelSetting() {
   if (models.some(bad)) await c.update('models', models.filter((m) => !bad(m)), vscode.ConfigurationTarget.Global);
 }
 
+/** Setup used to store the old 32000 default whenever it was saved; clear that once so the new default applies. */
+async function migrateContextWindow(context) {
+  if (context.globalState.get('migratedContextWindow')) return;
+  const c = vscode.workspace.getConfiguration('oaiAgent');
+  if ((c.inspect('contextWindow') || {}).globalValue === 32000) await c.update('contextWindow', undefined, vscode.ConfigurationTarget.Global);
+  await context.globalState.update('migratedContextWindow', true);
+}
+
 function activate(context) {
   repairBadModelSetting().catch(() => {});
+  migrateContextWindow(context).catch(() => {});
   const provider = new ChatViewProvider(context);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider('oaiAgent.chat', provider, { webviewOptions: { retainContextWhenHidden: true } }),

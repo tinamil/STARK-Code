@@ -111,7 +111,7 @@
         <button id="sToggle" title="Show all models" aria-label="Show all models">▾</button><button id="sFetch" title="Reload models from the server" aria-label="Reload models">↻</button></div>
         <div id="sList" class="clist" role="listbox" hidden></div>
         <div id="sHint" class="hint"></div></div>
-      <label>Context window (tokens)<input id="sCtx" type="number" value="${m.contextWindow || 32000}"></label>
+      <label>Context window (tokens)<input id="sCtx" type="number" value="${m.contextWindow || 1000000}"></label>
       <div class="btns"><button id="sTest">Test connection</button><button id="sSave" class="primary">Save</button><span class="sp"></span>${m.hasKey ? '<button id="sClear" title="Delete saved key">Clear key</button>' : ''}<button id="sMore">All settings</button></div>
       <pre id="sOut" hidden></pre>`;
     $('sApi').value = m.apiMode || 'chat';

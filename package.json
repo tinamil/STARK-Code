@@ -3,7 +3,7 @@
   "displayName": "OAI Agent",
   "description": "Autonomous coding agent for any OpenAI-compatible endpoint.",
   "publisher": "local",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "license": "MIT",
   "engines": {
     "vscode": "^1.85.0"
@@ -91,8 +91,8 @@
         },
         "oaiAgent.contextWindow": {
           "type": "number",
-          "default": 32000,
-          "description": "Model context window in tokens. History is auto-summarized at ~70%."
+          "default": 1000000,
+          "description": "Context window in tokens. Older conversation is summarized at ~70% of this. Larger = smarter but more tokens per request (every step resends the conversation). If a model's real limit is smaller, the agent detects it and adapts."
         },
         "oaiAgent.maxTokens": {
           "type": "number",
