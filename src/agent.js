@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { complete } = require('./llm');
-const { toolDefs, getTool, truncate } = require('./tools');
+const { toolDefs, getTool, truncate, resolvePath } = require('./tools');
 const { buildSystemPrompt } = require('./prompt');
 
 const estTokens = (msgs) => Math.ceil(JSON.stringify(msgs).length / 3.5);
@@ -19,6 +19,7 @@ const DANGER = [
   /\bdocker\s+(system\s+prune|rm|rmi|volume\s+rm)\b/, /\b(curl|wget)\b.*\|\s*(sudo\s+)?(ba|z)?sh\b/,
 ];
 const isDangerous = (cmd) => DANGER.some((re) => re.test(cmd));
+const isOutside = (root, p) => { const r = path.relative(root, p); return r === '..' || r.startsWith('..' + path.sep) || path.isAbsolute(r); };
 
 /**
  * ui: { post(msg), approve({id,name,summary,canDiff}) -> Promise<{decision:'yes'|'no'|'always', feedback?}>,
@@ -83,7 +84,16 @@ class Agent {
     return { files: [...restored], text, rewound };
   }
 
-  async run(userText, displayText) {
+  /** Resolves once any in-flight run has fully finished. */
+  async idle() { if (this.running) await this.running.catch(() => {}); }
+
+  run(userText, displayText) {
+    if (this.busy) return Promise.resolve();
+    this.running = this._run(userText, displayText);
+    return this.running;
+  }
+
+  async _run(userText, displayText) {
     if (this.busy) return;
     this.busy = true;
     this.abort = new AbortController();
@@ -194,13 +204,19 @@ class Agent {
 
   /** Returns null (no approval needed) or {warning?: string, allowAlways: boolean}. */
   needsApproval(tool, args, cfg, prep, root) {
-    if (tool.category === 'read' || tool.category === 'meta') return null;
+    if (tool.category === 'meta') return null;
+    if (tool.category === 'read') {
+      // Reading outside the workspace (e.g. ~/.ssh, other projects) needs approval; inside it never does.
+      if (args.path && isOutside(root, resolvePath(root, args.path))) {
+        return this.sessionAllowed.has('read_outside') ? null : { warning: 'This reads outside the workspace.', allowAlways: true, allowKey: 'read_outside' };
+      }
+      return null;
+    }
     if (tool.name === 'run_command' && isDangerous(String(args.command || ''))) {
       return { warning: 'Potentially destructive command. This always requires approval.', allowAlways: false };
     }
     if (tool.category === 'edit' && prep.path) {
-      const r = path.relative(root, prep.path);
-      if (r.startsWith('..') || path.isAbsolute(r)) return { warning: 'This file is outside the workspace.', allowAlways: false };
+      if (isOutside(root, prep.path)) return { warning: 'This file is outside the workspace.', allowAlways: false };
     }
     if (cfg.approvalMode === 'auto') return null;
     if (cfg.approvalMode === 'autoEdit' && tool.category === 'edit') return null;
@@ -208,7 +224,7 @@ class Agent {
     if (tool.name === 'run_command') {
       const cmd = String(args.command || '').trim();
       // Only auto-approve simple commands (no chaining/redirection) matching a prefix.
-      if (!/[;&|`$<>]/.test(cmd) && (cfg.autoApproveCommands || []).some((p) => cmd === p || cmd.startsWith(p + ' '))) return null;
+      if (!/[;&|`$<>\r\n]/.test(cmd) && (cfg.autoApproveCommands || []).some((p) => cmd === p || cmd.startsWith(p + ' '))) return null;
     }
     return { allowAlways: true };
   }
@@ -238,12 +254,21 @@ class Agent {
       if (need) {
         const canDiff = typeof prep.newContent === 'string';
         if (canDiff) this.ui.registerProposal(id, { path: prep.path, newContent: prep.newContent });
-        const ans = await this.ui.approve({ id, name, summary: prep.summary || name, canDiff, warning: need.warning, allowAlways: need.allowAlways });
+        const summary = prep.summary || (tool.category === 'read' ? `${name} ${args.path}` : name);
+        const ans = await this.ui.approve({ id, name, summary, canDiff, warning: need.warning, allowAlways: need.allowAlways });
         if (this.abort.signal.aborted) return done(false, 'Interrupted by user.');
-        if (ans.decision === 'always' && need.allowAlways) this.sessionAllowed.add(name);
+        if (ans.decision === 'always' && need.allowAlways) this.sessionAllowed.add(need.allowKey || name);
         if (ans.decision === 'no') {
           const fb = (ans.feedback || '').trim();
           return done(false, `The user denied this action.${fb ? ` User feedback: ${fb}` : ''}`, { denied: true, feedback: fb });
+        }
+        // The file may have changed while the approval was pending; never write content the user didn't see.
+        if (canDiff && tool.prepare) {
+          let again;
+          try { again = await tool.prepare(args, ctx); } catch (e) { again = null; }
+          if (!again || again.newContent !== prep.newContent) {
+            return done(false, `Error: ${args.path} changed while waiting for approval. Re-read it and try again.`);
+          }
         }
       }
       if (tool.category === 'edit' && prep.path && !this.checkpoints.some((c) => c.turn === this.turn && c.path === prep.path)) {

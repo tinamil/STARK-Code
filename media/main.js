@@ -276,7 +276,7 @@
         const mod = isMac ? '⌘' : 'Ctrl';
         box.innerHTML = `<div class="q">Allow <b>${esc(m.name)}</b>?</div>${m.warning ? `<div class="warn">⚠ ${esc(m.warning)}</div>` : ''}<pre>${esc(m.summary)}</pre>
           <input class="fb" placeholder="Feedback (Enter denies with this message)">
-          <div class="btns"><button data-a="yes" class="primary">Allow</button>${m.canDiff ? '<button data-a="diff">View diff</button>' : ''}${m.allowAlways ? `<button data-a="always">Always allow ${esc(m.name)}</button>` : ''}<button data-a="no" class="deny">Deny</button></div>
+          <div class="btns"><button data-a="yes" class="primary">Allow</button>${m.canDiff ? '<button data-a="diff">View diff</button>' : ''}${m.allowAlways ? `<button data-a="always">${m.warning === 'This reads outside the workspace.' ? 'Always allow outside reads' : `Always allow ${esc(m.name)}`}</button>` : ''}<button data-a="no" class="deny">Deny</button></div>
           <div class="keys">Enter allow · Esc deny${m.canDiff ? ` · ${mod}+Enter diff` : ''} · from editor: ${mod}+Alt+Y / ${mod}+Alt+N</div>`;
         box.addEventListener('click', (e) => { const a = e.target.dataset && e.target.dataset.a; if (a) answer(box, a); });
         d.appendChild(box);
