@@ -74,7 +74,7 @@ These files at the workspace root are added to the system prompt: `AGENTS.md`, `
 
 ## Building and releasing
 - Build: `npx @vscode/vsce package`. There are no dependencies and no build step.
-- Release: bump `version` in package.json, commit, then push a matching tag (`git tag v<version> && git push origin v<version>`). The Release workflow builds the .vsix and attaches it to a GitHub release.
+- Release: bump `version` in package.json in a PR. When it merges to `main`, the Release workflow runs the tests, builds `stark-code-<version>.vsix`, and publishes a GitHub release with the `v<version>` tag. Versions that already have a release are skipped. Pushing a `v<version>` tag by hand also works.
 
 ## Development
 - Run the tests with `npm test` (Node 22+, no dependencies). The PowerShell script-checker tests run when PowerShell is installed. Set `REQUIRE_POWERSHELL=1` to make a missing PowerShell an error, and `OAI_AGENT_PWSH` to choose a specific PowerShell.
