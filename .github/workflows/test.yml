@@ -1,0 +1,27 @@
+name: Tests
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Tests (PowerShell 7 for the script checker)
+        run: npm test
+        env:
+          REQUIRE_POWERSHELL: '1'
+      - name: Script checker on Windows PowerShell 5.1
+        if: runner.os == 'Windows'
+        run: node --test test/psreadonly.test.js
+        env:
+          REQUIRE_POWERSHELL: '1'
+          OAI_AGENT_PWSH: powershell.exe

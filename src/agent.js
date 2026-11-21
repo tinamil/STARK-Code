@@ -5,6 +5,10 @@ const { toolDefs, getTool, truncate, resolvePath } = require('./tools');
 const { buildSystemPrompt } = require('./prompt');
 const { diffLines } = require('./diff');
 const readonly = require('./readonly');
+const textfile = require('./textfile');
+
+// Rewind keeps a copy of each file before the agent first changes it in a turn; larger files are not copied.
+const MAX_CHECKPOINT_BYTES = 2 * 1024 * 1024;
 const psreadonly = require('./psreadonly');
 
 const estTokens = (msgs) => Math.ceil(JSON.stringify(msgs).length / 3.5);
@@ -38,8 +42,10 @@ const isOutside = (root, p) => { const r = path.relative(root, p); return r === 
  *       registerProposal(id, {path,newContent}), log(text) }
  */
 class Agent {
-  constructor({ getConfig, getApiKey, getRoot, ui }) {
+  /** io: { readText(path), writeText(path, text, encoding) }; defaults to plain file I/O (src/textfile.js). */
+  constructor({ getConfig, getApiKey, getRoot, ui, io }) {
     this.getConfig = getConfig; this.getApiKey = getApiKey; this.getRoot = getRoot; this.ui = ui;
+    this.io = io || textfile;
     this.reset();
   }
 
@@ -82,11 +88,14 @@ class Agent {
   async revertTo(turn) {
     if (this.busy) throw new Error('Stop the agent before rewinding.');
     const cps = this.checkpoints.filter((c) => c.turn >= turn);
-    const restored = new Set();
+    const restored = new Set(), skipped = new Set();
     for (const c of cps.slice().reverse()) {
+      if (c.skipped) { skipped.add(c.path); continue; }
       if (c.before === null) { try { await fs.promises.unlink(c.path); } catch { /* already gone */ } }
-      else { await fs.promises.mkdir(path.dirname(c.path), { recursive: true }); await fs.promises.writeFile(c.path, c.before, 'utf8'); }
+      else if (c.bytes) { await fs.promises.mkdir(path.dirname(c.path), { recursive: true }); await fs.promises.writeFile(c.path, Buffer.from(c.bytes, 'base64')); }
+      else await this.io.writeText(c.path, c.before, c.encoding || 'utf8');
       restored.add(c.path);
+      skipped.delete(c.path);
     }
     this.checkpoints = this.checkpoints.filter((c) => c.turn < turn);
     const idx = this.messages.findIndex((m) => m.role === 'user' && m._turn === turn);
@@ -94,7 +103,7 @@ class Agent {
     if (idx > 0) { text = this.messages[idx]._display || ''; this.messages = this.messages.slice(0, idx); rewound = true; }
     else this.messages.push({ role: 'user', content: '[The user reverted all file changes made since an earlier point (now summarized). Re-read files before editing.]' }, { role: 'assistant', content: 'Noted.' });
     this.readFiles.clear();
-    return { files: [...restored], text, rewound };
+    return { files: [...restored], skipped: [...skipped].filter((p) => !restored.has(p)), text, rewound };
   }
 
   /** Resolves once any in-flight run has fully finished. */
@@ -258,6 +267,16 @@ class Agent {
     return { allowAlways: true };
   }
 
+  /** What Rewind needs to restore a file: its text and encoding, raw bytes, or a note that it was too large. */
+  async snapshot(p) {
+    let st;
+    try { st = await fs.promises.stat(p); } catch { return { before: null }; }   // new file: Rewind deletes it
+    if (st.size > MAX_CHECKPOINT_BYTES) return { skipped: true, size: st.size };
+    const f = await this.io.readText(p);
+    if (f.binary) return { bytes: (await fs.promises.readFile(p)).toString('base64') };
+    return { before: f.text, encoding: f.encoding };
+  }
+
   /** Simple commands are checked by pattern; PowerShell scripts by PowerShell's parser (when available). */
   async isReadOnlyCommand(args, cfg, root) {
     const cmd = String(args.command || '').trim();
@@ -283,7 +302,7 @@ class Agent {
     if (!args || typeof args !== 'object') return done(false, `Error: arguments for ${name} were not valid JSON: ${tc.function.arguments}`);
 
     const ctx = {
-      root, cfg, signal: this.abort.signal, readFiles: this.readFiles,
+      root, cfg, signal: this.abort.signal, readFiles: this.readFiles, io: this.io,
       post: (m) => this.ui.post(m), log: (t) => this.ui.log && this.ui.log(t),
     };
     try {
@@ -318,9 +337,7 @@ class Agent {
         }
       }
       if (tool.category === 'edit' && prep.path && !this.checkpoints.some((c) => c.turn === this.turn && c.path === prep.path)) {
-        let before = null;
-        try { before = await fs.promises.readFile(prep.path, 'utf8'); } catch { /* new file */ }
-        this.checkpoints.push({ turn: this.turn, path: prep.path, before });
+        this.checkpoints.push({ turn: this.turn, path: prep.path, ...(await this.snapshot(prep.path)) });
       }
       const out = await tool.run(args, ctx, prep);
       if (diff) this.ui.post({ type: 'toolDiff', id, diff, summary: prep.summary, explanation });

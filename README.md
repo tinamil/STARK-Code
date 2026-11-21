@@ -1,4 +1,4 @@
-# OAI Agent
+# STARK Code
 
 A coding agent for VS Code that works with any OpenAI-compatible `/chat/completions` endpoint that supports tool calling. Examples: Ollama, LM Studio, vLLM, llama.cpp server, LiteLLM, OpenRouter, Azure/OpenAI.
 
@@ -34,6 +34,11 @@ STARK locks API keys 14 days after they're created or unlocked. When that happen
 - `X-Stark-Key-Expiring-Soon` triggers a warning that your key is near expiry.
 - If `/models` reports `capabilities.tools: false`, the model picker marks that model "(no tools)".
 
+## How edits are made
+- **Files open in VS Code:** the agent reads the editor's current text, including unsaved changes. It applies its edit as a normal editor change, so **Ctrl+Z** undoes it, and then saves. If the file had unsaved changes, they're saved too, and the agent is told so.
+- **Other files:** written directly to disk.
+- **Encodings:** files keep their encoding: UTF-8, UTF-8 with BOM, UTF-16 LE/BE, or Windows-1252. If an edit adds a character the file's encoding can't store, such as an emoji in a Windows-1252 file, the agent is told instead of the file being corrupted.
+
 ## Approvals
 - An edit's approval card shows the change as a diff, plus the agent's one-line explanation of what it does and why. Commands show their explanation too. **Open in diff editor** (Ctrl/Cmd+Enter) opens VS Code's side-by-side view.
 - Enter allows, Esc denies, and Ctrl/Cmd+Enter opens the diff. These work while the panel has focus.
@@ -42,7 +47,8 @@ STARK locks API keys 14 days after they're created or unlocked. When that happen
 
 ## Rewind and history
 - Hover a message of yours and click **↶ Rewind**. This restores every file the agent edited since that message, rewinds the chat, and puts the message back in the input box for editing. Changes made by shell commands are not tracked.
-- **History** lists saved chats for this workspace. They are kept in VS Code's global storage.
+- **History** lists saved chats for this workspace. They're kept in VS Code's global storage. The 100 most recent chats are kept, and chats older than 90 days are deleted.
+- Rewind keeps a copy of each file the first time the agent changes it in a turn. Files over 2 MB aren't copied, and Rewind lists them as not restored.
 
 ## Safety
 - `approvalMode`:
@@ -62,8 +68,12 @@ These files at the workspace root are added to the system prompt: `AGENTS.md`, `
 
 ## Notes
 - How well the agent works depends mostly on the model. Use a strong model that supports tool calling.
-- Command output streams to the **OAI Agent** output channel.
+- Command output streams to the **STARK Code** output channel.
 
 ## Building and releasing
 - Build: `npx @vscode/vsce package`. There are no dependencies and no build step.
 - Release: bump `version` in package.json, commit, then push a matching tag (`git tag v0.3.0 && git push origin v0.3.0`). The Release workflow builds the .vsix and attaches it to a GitHub release.
+
+## Development
+- Run the tests with `npm test` (Node 22+, no dependencies). The PowerShell script-checker tests run when PowerShell is installed. Set `REQUIRE_POWERSHELL=1` to make a missing PowerShell an error, and `OAI_AGENT_PWSH` to choose a specific PowerShell.
+- CI runs the tests on Linux and Windows, including Windows PowerShell 5.1, for every PR. The release workflow runs them before packaging.

@@ -123,6 +123,9 @@ const CMDLETS = new Set([
   'convertto-json', 'convertfrom-json', 'convertto-csv', 'convertfrom-csv', 'compare-object', 'compare', 'diff',
   'get-date', 'get-unique', 'gu', 'get-member', 'gm', 'select-xml', 'get-command', 'gcm', 'out-null', 'get-random',
 ]);
+// On Linux/macOS PowerShell these names run native programs (e.g. /usr/bin/sort, ImageMagick's
+// compare), not the cmdlets they alias on Windows, so they are only read-only on Windows.
+const WINDOWS_ONLY_ALIASES = new Set(['cat', 'ls', 'sort', 'diff', 'compare', 'write']);
 // ForEach-Object with a string argument invokes that method on every item (e.g. `% Delete`): only script blocks allowed.
 const BLOCK_ONLY = new Set(['foreach-object', 'foreach', '%']);
 const FOREACH_PARAMS = new Set(['process', 'begin', 'end']);
@@ -157,7 +160,7 @@ const CAST_TYPES = new Set(['string', 'int', 'int32', 'int64', 'long', 'double',
   'collections.generic.list[string]', 'collections.generic.list[object]', 'collections.generic.list[int]', 'math', 'convert',
   'io.path', 'io.file', 'io.directory', 'environment', 'text.encoding']);
 
-function evaluate(r, { root, cwd }) {
+function evaluate(r, { root, cwd, platform = process.platform }) {
   if (r.errors && r.errors.length) return { ok: false, reason: `PowerShell parse error: ${r.errors[0]}` };
   if (r.banned.length) return { ok: false, reason: `contains ${r.banned[0].replace(/Ast$/, '')}` };
   if (r.fileRedirects) return { ok: false, reason: 'redirects output to a file' };
@@ -165,7 +168,7 @@ function evaluate(r, { root, cwd }) {
     if (!c.name) return { ok: false, reason: 'calls a command whose name is computed' };
     if (c.op !== 'Unknown') return { ok: false, reason: `invokes with ${c.op === 'Ampersand' ? '&' : '.'}` };
     const n = norm(c.name);
-    if (!CMDLETS.has(n)) return { ok: false, reason: `${c.name} is not a read-only command` };
+    if (!CMDLETS.has(n) || (platform !== 'win32' && WINDOWS_ONLY_ALIASES.has(n))) return { ok: false, reason: `${c.name} is not a read-only command` };
     if (BLOCK_ONLY.has(n) && (c.nonBlockArgs > 0 || c.params.some((p) => !FOREACH_PARAMS.has(p)))) return { ok: false, reason: `${c.name} with a member name runs methods` };
   }
   for (const m of r.members) {

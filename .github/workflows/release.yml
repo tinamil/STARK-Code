@@ -11,9 +11,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       - name: Check tag matches package.json version
         run: test "v$(node -p "require('./package.json').version")" = "${GITHUB_REF_NAME}"
+      - name: Test
+        run: npm test
       - name: Package
         run: npx --yes @vscode/vsce@3 package
       - name: Create release

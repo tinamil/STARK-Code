@@ -2,6 +2,7 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
 const { spawn, execFileSync } = require('child_process');
+const textfile = require('./textfile');
 
 const SKIP_DIRS = new Set(['node_modules', '.git', '.hg', '.svn', 'dist', 'build', 'out', '.next', '__pycache__', '.venv', 'venv', 'target', '.idea']);
 
@@ -105,9 +106,9 @@ const TOOLS = [
     }, required: ['path'] },
     async run(a, ctx) {
       const p = resolvePath(ctx.root, a.path);
-      const buf = await fsp.readFile(p);
-      if (isBinary(buf)) return `${a.path} is a binary file (${buf.length} bytes).`;
-      const lines = buf.toString('utf8').split(/\r?\n/);
+      const f = await ctx.io.readText(p);
+      if (f.binary) return `${a.path} is a binary file (${f.size} bytes).`;
+      const lines = f.text.split(/\r?\n/);
       const start = Math.max(1, a.offset || 1);
       const limit = a.limit || 2000;
       const slice = lines.slice(start - 1, start - 1 + limit);
@@ -127,13 +128,18 @@ const TOOLS = [
     async prepare(a, ctx) {
       const p = resolvePath(ctx.root, a.path);
       const exists = fs.existsSync(p);
-      const oldContent = exists ? await fsp.readFile(p, 'utf8') : null;
-      return { path: p, oldContent, newContent: a.content, summary: `${exists ? 'Overwrite' : 'Create'} ${rel(ctx.root, p)}` };
+      let oldContent = null, encoding = 'utf8';
+      if (exists) {
+        const f = await ctx.io.readText(p);
+        if (!f.binary) { oldContent = f.text; encoding = f.encoding; }
+      }
+      textfile.encode(a.content, encoding);   // fails early if the file's encoding can't hold the text
+      return { path: p, oldContent, encoding, newContent: a.content, summary: `${exists ? 'Overwrite' : 'Create'} ${rel(ctx.root, p)}` };
     },
     async run(a, ctx, prep) {
-      await fsp.mkdir(path.dirname(prep.path), { recursive: true });
-      await fsp.writeFile(prep.path, prep.newContent, 'utf8');
+      const w = await ctx.io.writeText(prep.path, prep.newContent, prep.encoding);
       ctx.readFiles.add(prep.path);
+      if (w && w.savedUserChanges) return `Wrote ${prep.newContent.split('\n').length} lines to ${rel(ctx.root, prep.path)} (the file had unsaved changes in the editor; they were saved too)`;
       return `Wrote ${prep.newContent.split('\n').length} lines to ${rel(ctx.root, prep.path)}`;
     },
   },
@@ -150,7 +156,9 @@ const TOOLS = [
     async prepare(a, ctx) {
       const p = resolvePath(ctx.root, a.path);
       if (!fs.existsSync(p)) throw new Error(`File not found: ${a.path}. Use write_file to create it.`);
-      let text = await fsp.readFile(p, 'utf8');
+      const f = await ctx.io.readText(p);
+      if (f.binary) throw new Error(`${a.path} is a binary file and can't be edited.`);
+      let text = f.text;
       const oldContent = text;
       const crlf = text.includes('\r\n');
       if (crlf) text = text.replace(/\r\n/g, '\n');
@@ -162,11 +170,13 @@ const TOOLS = [
       if (count > 1 && !a.replace_all) throw new Error(`old_string occurs ${count} times. Add more context to make it unique, or set replace_all.`);
       let out = a.replace_all ? text.split(oldS).join(newS) : text.replace(oldS, () => newS);
       if (crlf) out = out.replace(/\n/g, '\r\n');
-      return { path: p, oldContent, newContent: out, count: a.replace_all ? count : 1, summary: `Edit ${rel(ctx.root, p)}` };
+      textfile.encode(out, f.encoding);   // fails early if the file's encoding can't hold the text
+      return { path: p, oldContent, encoding: f.encoding, newContent: out, count: a.replace_all ? count : 1, summary: `Edit ${rel(ctx.root, p)}` };
     },
     async run(a, ctx, prep) {
-      await fsp.writeFile(prep.path, prep.newContent, 'utf8');
-      return `Edited ${rel(ctx.root, prep.path)} (${prep.count} replacement${prep.count > 1 ? 's' : ''}).`;
+      const w = await ctx.io.writeText(prep.path, prep.newContent, prep.encoding);
+      const note = w && w.savedUserChanges ? ' The file had unsaved changes in the editor; they were saved too.' : '';
+      return `Edited ${rel(ctx.root, prep.path)} (${prep.count} replacement${prep.count > 1 ? 's' : ''}).${note}`;
     },
   },
   {
@@ -303,9 +313,22 @@ const TOOLS = [
     parameters: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] },
     async prepare(a) { return { summary: `GET ${a.url}` }; },
     async run(a, ctx) {
-      const res = await fetch(a.url, { signal: ctx.signal, headers: { 'User-Agent': 'oai-agent', Accept: 'text/html,text/plain,application/json,*/*' } });
-      let t = await res.text();
-      if ((res.headers.get('content-type') || '').includes('html')) {
+      const res = await fetch(a.url, { signal: ctx.signal, headers: { 'User-Agent': 'stark-code', Accept: 'text/html,text/plain,application/json,*/*' } });
+      const type = (res.headers.get('content-type') || '').toLowerCase();
+      if (type && !/text\/|json|xml|javascript|ecmascript|yaml|csv|markdown/.test(type)) {
+        res.body && res.body.cancel().catch(() => {});
+        return `HTTP ${res.status}: not text (${type}); content not shown.`;
+      }
+      // Read at most 2 MB; larger pages are cut off.
+      const MAX = 2 * 1024 * 1024;
+      const chunks = []; let size = 0, cut = false;
+      for await (const chunk of res.body || []) {
+        chunks.push(chunk); size += chunk.length;
+        if (size >= MAX) { cut = true; break; }
+      }
+      if (cut) res.body.cancel().catch(() => {});
+      let t = Buffer.concat(chunks).subarray(0, MAX).toString('utf8') + (cut ? '\n\n[Page cut off at 2 MB]' : '');
+      if (type.includes('html')) {
         t = t.replace(/<(script|style|noscript|svg)[\s\S]*?<\/\1>/gi, '')
           .replace(/<br\s*\/?>|<\/(p|div|li|h\d|tr)>/gi, '\n')
           .replace(/<[^>]+>/g, '')

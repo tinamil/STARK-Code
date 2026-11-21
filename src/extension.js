@@ -3,6 +3,8 @@ const os = require('os');
 const path = require('path');
 const { Agent } = require('./agent');
 const { listModels, testConnection } = require('./llm');
+const { createEditorIo } = require('./editorio');
+const { ChatStore } = require('./chatstore');
 
 const SECRET_KEY = 'oaiAgent.apiKey';
 const PROPOSED_SCHEME = 'oai-agent-proposed';
@@ -28,8 +30,8 @@ class ChatViewProvider {
     this.pending = new Map();     // approval id -> resolve
     this.proposals = new Map();   // id -> {path, newContent}
     this.serverModels = [];
-    this.output = vscode.window.createOutputChannel('OAI Agent');
-    this.chatsDir = vscode.Uri.joinPath(context.globalStorageUri, 'chats');
+    this.output = vscode.window.createOutputChannel('STARK Code');
+    this.chats = new ChatStore(vscode.Uri.joinPath(context.globalStorageUri, 'chats').fsPath);
     this.proposedProvider = {
       provideTextDocumentContent: (uri) => {
         const p = this.proposals.get(new URLSearchParams(uri.query).get('id'));
@@ -38,6 +40,7 @@ class ChatViewProvider {
     };
     this.agent = new Agent({
       getConfig, getRoot,
+      io: createEditorIo(vscode),
       getApiKey: () => this.getKey(),
       ui: {
         post: (m) => this.post(m),
@@ -175,7 +178,7 @@ class ChatViewProvider {
       case 'history': this.post({ type: 'history', items: await this.listChats() }); break;
       case 'loadChat': await this.loadChat(m.id); break;
       case 'deleteChat': {
-        await vscode.workspace.fs.delete(vscode.Uri.joinPath(this.chatsDir, `${m.id}.json`)).then(undefined, () => {});
+        await this.chats.remove(m.id);
         this.post({ type: 'history', items: await this.listChats() });
         break;
       }
@@ -226,30 +229,19 @@ class ChatViewProvider {
   // ----- persistence -----
   async saveChat() {
     if (!this.agent.messages.some((m) => m.role === 'user')) return;
-    await vscode.workspace.fs.createDirectory(this.chatsDir);
-    const data = Buffer.from(JSON.stringify(this.agent.toJSON()));
-    await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(this.chatsDir, `${this.agent.chatId}.json`), data);
+    try { await this.chats.save(this.agent.toJSON()); }
+    catch (e) { this.post({ type: 'error', text: `Could not save this chat: ${e.message}` }); }
   }
 
   async listChats() {
-    let entries = [];
-    try { entries = await vscode.workspace.fs.readDirectory(this.chatsDir); } catch { return []; }
-    const root = getRoot();
-    const items = [];
-    for (const [name] of entries) {
-      if (!name.endsWith('.json')) continue;
-      try {
-        const d = JSON.parse(Buffer.from(await vscode.workspace.fs.readFile(vscode.Uri.joinPath(this.chatsDir, name))).toString('utf8'));
-        if (d.root === root) items.push({ id: d.id, title: d.title, updated: d.updated, current: d.id === this.agent.chatId });
-      } catch { /* skip corrupt */ }
-    }
-    return items.sort((a, b) => b.updated - a.updated).slice(0, 100);
+    const items = await this.chats.list(getRoot());
+    return items.map((c) => ({ ...c, current: c.id === this.agent.chatId }));
   }
 
   async loadChat(id) {
     if (this.agent.busy) { this.post({ type: 'info', text: 'Stop the agent before switching chats.' }); return; }
     await this.saveChat();
-    const d = JSON.parse(Buffer.from(await vscode.workspace.fs.readFile(vscode.Uri.joinPath(this.chatsDir, `${id}.json`))).toString('utf8'));
+    const d = await this.chats.load(id);
     this.clearPending();
     this.agent.load(d);
     this.replay();
@@ -293,6 +285,7 @@ class ChatViewProvider {
     const r = await this.agent.revertTo(turn);
     this.replay();
     this.post({ type: 'info', text: `Rewound${r.files.length ? `, restored ${r.files.length} file(s)` : ''}.` });
+    if (r.skipped && r.skipped.length) this.post({ type: 'error', text: `Not restored (too large to keep a copy, over 2 MB): ${r.skipped.map((p) => vscode.workspace.asRelativePath(p)).join(', ')}` });
     if (r.text) this.post({ type: 'restoreInput', text: r.text });
     await this.saveChat();
   }
@@ -328,7 +321,7 @@ function activate(context) {
       const v = await vscode.window.showInputBox({ prompt: 'API key for the OpenAI-compatible endpoint (leave empty to clear)', password: true, ignoreFocusOut: true });
       if (v === undefined) return;
       if (v) await context.secrets.store(SECRET_KEY, v); else await context.secrets.delete(SECRET_KEY);
-      vscode.window.showInformationMessage(v ? 'OAI Agent: API key saved.' : 'OAI Agent: API key cleared.');
+      vscode.window.showInformationMessage(v ? 'STARK Code: API key saved.' : 'STARK Code: API key cleared.');
     }),
     vscode.commands.registerCommand('oaiAgent.newChat', () => provider.newChat()),
     vscode.commands.registerCommand('oaiAgent.stop', () => provider.agent.stop()),
