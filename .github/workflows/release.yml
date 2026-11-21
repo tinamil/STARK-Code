@@ -1,9 +1,17 @@
 name: Release
+# Publishes a release when a merge to main changes the version in package.json
+# (or when a v* tag is pushed by hand). Skips versions that are already released.
 on:
   push:
+    branches: [main]
+    paths: ['package.json', '.github/workflows/release.yml']
     tags: ['v*']
+  workflow_dispatch:
 permissions:
   contents: write
+concurrency:
+  group: release
+  cancel-in-progress: false
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -12,14 +20,32 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Check tag matches package.json version
-        run: test "v$(node -p "require('./package.json').version")" = "${GITHUB_REF_NAME}"
-      - name: Test
-        run: npm test
-      - name: Package
-        # The extension ID stays oai-agent (so installs upgrade in place); only the file is named stark-code.
-        run: npx --yes @vscode/vsce@3 package --out "stark-code-${GITHUB_REF_NAME#v}.vsix"
-      - name: Create release
+      - name: Decide whether to release
+        id: v
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" *.vsix --title "STARK Code $GITHUB_REF_NAME" --generate-notes
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $VERSION"; exit 1
+          fi
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "v$VERSION is already released; nothing to do."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Test
+        if: steps.v.outputs.release == 'true'
+        run: npm test
+      - name: Package
+        if: steps.v.outputs.release == 'true'
+        # The extension ID stays oai-agent (so installs upgrade in place); only the file is named stark-code.
+        run: npx --yes @vscode/vsce@3 package --out "stark-code-${{ steps.v.outputs.version }}.vsix"
+      - name: Create release (and its tag)
+        if: steps.v.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.v.outputs.version }}
+        run: gh release create "v$VERSION" *.vsix --target "$GITHUB_SHA" --title "STARK Code v$VERSION" --generate-notes
