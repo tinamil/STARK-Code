@@ -1,8 +1,17 @@
 name: Tests
 on:
-  push:
-    branches: [main]
   pull_request:
+    # Docs-only changes don't need the test suite.
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+  # Merges to main were already tested on their PR; run manually if ever needed.
+  workflow_dispatch:
+# A newer push to the same PR cancels the run still in progress.
+concurrency:
+  group: tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   test:
     strategy:
