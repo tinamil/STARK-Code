@@ -4,6 +4,7 @@ const { complete } = require('./llm');
 const { toolDefs, getTool, truncate, resolvePath } = require('./tools');
 const { buildSystemPrompt } = require('./prompt');
 const { diffLines } = require('./diff');
+const readonly = require('./readonly');
 
 const estTokens = (msgs) => Math.ceil(JSON.stringify(msgs).length / 3.5);
 // Strip internal fields (prefixed with _) before sending to the API.
@@ -247,6 +248,8 @@ class Agent {
     if (this.sessionAllowed.has(tool.name)) return null;
     if (tool.name === 'run_command') {
       const cmd = String(args.command || '').trim();
+      // Read-only commands inside the workspace (Get-Content, git status, node --check, ...) run without asking.
+      if (cfg.autoApproveReadOnlyCommands !== false && readonly.classify(cmd, { root, cwd: resolvePath(root, args.cwd || '.') }).ok) return null;
       // Only auto-approve simple commands (no chaining/redirection) matching a prefix.
       if (!/[;&|`$<>\r\n]/.test(cmd) && (cfg.autoApproveCommands || []).some((p) => cmd === p || cmd.startsWith(p + ' '))) return null;
     }

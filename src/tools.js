@@ -260,7 +260,7 @@ const TOOLS = [
   },
   {
     name: 'run_command', category: 'exec',
-    description: 'Run a shell command in the workspace (non-interactive, no stdin). Returns combined stdout/stderr and exit code. Use for builds, tests, git, package managers, etc.',
+    description: 'Run one shell command in the workspace (non-interactive, no stdin). Returns combined stdout/stderr and the exit code. Use for builds, tests, project scripts, git, package managers and syntax checks (e.g. node --check file.js). Do not use it to read, search or edit files: use read_file, grep, glob, list_dir, edit_file and write_file. Keep it to a single simple command, not a multi-line script.',
     parameters: { type: 'object', properties: {
       command: { type: 'string' },
       cwd: { type: 'string', description: 'Working directory (default: workspace root)' },

@@ -5,7 +5,7 @@ A coding agent for VS Code that works with any OpenAI-compatible `/chat/completi
 ## Install (offline)
 Download the `.vsix` from [Releases](https://github.com/tinamil/STARK-Code/releases), then run:
 
-    code --install-extension oai-agent-0.4.0.vsix
+    code --install-extension oai-agent-0.5.0.vsix
 Or use the Extensions view: `...` menu → **Install from VSIX...**
 
 ## Setup
@@ -47,6 +47,7 @@ STARK locks API keys 14 days after they're created or unlocked. When that happen
   - `autoEdit`: file edits run without asking.
   - `auto`: nothing asks.
 - Edit approvals include a **View diff** button.
+- Read-only commands run without asking, as long as every path they touch is inside the workspace. Examples: `Get-Content`, `Get-ChildItem`, `Select-String`, `type`, `dir`, `findstr`, `cat`, `grep`, `git status/diff/log/show`, `node --check`, `tsc --noEmit`, `--version` checks. They also run without asking when wrapped in `powershell -NoProfile -Command "..."`. Anything with pipes, variables, chaining, redirects or script blocks still asks. Turn this off with `oaiAgent.autoApproveReadOnlyCommands`.
 - These always ask, even in `auto` mode, and never offer "Always allow":
   - destructive commands (`rm -rf`, `git push --force`, `git reset --hard`, `DROP TABLE`, `sudo`, `terraform destroy` and similar)
   - edits to files outside the workspace
