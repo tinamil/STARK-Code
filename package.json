@@ -3,7 +3,7 @@
   "displayName": "STARK Code",
   "description": "Coding agent for VS Code that works with the STARK API gateway and other OpenAI-compatible endpoints.",
   "publisher": "local",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "license": "MIT",
   "engines": {
     "vscode": "^1.85.0"
@@ -91,8 +91,8 @@
         },
         "oaiAgent.contextWindow": {
           "type": "number",
-          "default": 1000000,
-          "description": "Context window in tokens. Older conversation is summarized at ~70% of this. Larger = smarter but more tokens per request (every step resends the conversation). If a model's real limit is smaller, the agent detects it and adapts."
+          "default": 200000,
+          "description": "Context window in tokens. Older conversation is summarized at ~70% of this. Every step resends the conversation, so a larger window means more tokens per step against the gateway's daily budget. It is also capped automatically under the gateway's tokens-per-minute limit, and lowered if a model's real limit is smaller."
         },
         "oaiAgent.maxTokens": {
           "type": "number",

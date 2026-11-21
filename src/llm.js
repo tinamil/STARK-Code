@@ -13,6 +13,13 @@ function readMeta(h) {
     creditsLimit: num('x-ratelimit-limit-credits-day'),
     creditsRemaining: num('x-ratelimit-remaining-credits-day'),
     creditsUsed: num('x-ratelimit-credits-used'),
+    creditsResetS: num('x-ratelimit-reset-credits-day'),
+    tokensLimit: num('x-ratelimit-limit-tokens-minute'),
+    tokensRemaining: num('x-ratelimit-remaining-tokens-minute'),
+    tokensResetS: num('x-ratelimit-reset-tokens-minute'),
+    requestsLimit: num('x-ratelimit-limit-requests-minute'),
+    requestsRemaining: num('x-ratelimit-remaining-requests-minute'),
+    requestsResetS: num('x-ratelimit-reset-requests-minute'),
     keyExpiresAt: h.get('x-stark-key-expires-at') || undefined,
     keyExpiringSoon: (h.get('x-stark-key-expiring-soon') || '').toLowerCase() === 'true',
   };
@@ -64,8 +71,10 @@ async function post(url, body, { apiKey, headers = {}, signal }) {
     const locked = res.status === 401 ? lockedKeyError(t) : null;
     if (locked) throw locked;
     const hint = res.status === 401 ? ' (the API key is invalid or expired; update it under Setup)' : res.status === 403 ? ' (key lacks scope for this model/endpoint)' : '';
-    throw new LlmError(`HTTP ${res.status}${hint} from ${url}: ${t.slice(0, 2000)}`,
+    const err = new LlmError(`HTTP ${res.status}${hint} from ${url}: ${t.slice(0, 2000)}`,
       res.status === 429 || res.status >= 500, parseRetryAfter(res.headers.get('retry-after')));
+    err.meta = readMeta(res.headers);
+    throw err;
   }
   return res;
 }
@@ -383,6 +392,9 @@ async function testConnection(opts) {
       } catch (e) { lines.push(`• ${otherEp} not usable: ${e.message.slice(0, 200)}`); }
     }
     if (meta.creditsRemaining !== undefined) lines.push(`• Credits today: ${meta.creditsRemaining}${meta.creditsLimit !== undefined ? ` / ${meta.creditsLimit}` : ''} remaining`);
+    if (meta.tokensLimit !== undefined || meta.requestsLimit !== undefined) {
+      lines.push(`• Rate limits: ${[meta.tokensLimit !== undefined ? `${meta.tokensLimit.toLocaleString('en-US')} tokens/minute` : '', meta.requestsLimit !== undefined ? `${meta.requestsLimit} requests/minute` : ''].filter(Boolean).join(', ')}`);
+    }
     if (meta.keyExpiringSoon) lines.push(`⚠ API key expires ${meta.keyExpiresAt || 'within 7 days'}`);
     return { ok: p.ok, lines, models };
   } catch (e) {
