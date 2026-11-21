@@ -5,7 +5,7 @@ A coding agent for VS Code that works with any OpenAI-compatible `/chat/completi
 ## Install (offline)
 Download the `.vsix` from [Releases](https://github.com/tinamil/STARK-Code/releases), then run:
 
-    code --install-extension oai-agent-0.3.0.vsix
+    code --install-extension oai-agent-0.3.1.vsix
 Or use the Extensions view: `...` menu → **Install from VSIX...**
 
 ## Setup
