@@ -1,7 +1,7 @@
 const vscode = require('vscode');
 const os = require('os');
 const path = require('path');
-const { Agent } = require('./agent');
+const { Agent, displayArgs } = require('./agent');
 const { listModels, testConnection } = require('./llm');
 const { createEditorIo } = require('./editorio');
 const { ChatStore } = require('./chatstore');
@@ -28,6 +28,7 @@ class ChatViewProvider {
     this.context = context;
     this.view = null;
     this.pending = new Map();     // approval id -> resolve
+    this.pendingReqs = new Map(); // approval id -> request, so a reloaded panel can show it again
     this.proposals = new Map();   // id -> {path, newContent}
     this.serverModels = [];
     this.output = vscode.window.createOutputChannel('STARK Code');
@@ -48,6 +49,7 @@ class ChatViewProvider {
         registerProposal: (id, p) => this.proposals.set(id, p),
         approve: (req) => new Promise((resolve) => {
           this.pending.set(req.id, resolve);
+          this.pendingReqs.set(req.id, req);
           this.updateApprovalContext();
           this.post({ type: 'approval', ...req });
           const onAbort = () => this.resolveApproval(req.id, { decision: 'no' });
@@ -67,6 +69,7 @@ class ChatViewProvider {
     const r = this.pending.get(id);
     if (!r) return;
     this.pending.delete(id);
+    this.pendingReqs.delete(id);
     this.updateApprovalContext();
     this.post({ type: 'approvalDone', id });
     r(answer);
@@ -104,6 +107,7 @@ class ChatViewProvider {
 <button id="btnNew" title="New chat">New</button><button id="btnHistory" title="Past chats">History</button><button id="btnSetup" title="Connection setup">Setup</button></div>
 <div id="panel" hidden></div>
 <div id="log"></div>
+<button id="pendingBar" hidden>Waiting for your approval. Show the prompt ↓</button>
 <div id="todos" hidden></div>
 <div id="bottom">
 <textarea id="input" rows="3" placeholder="Ask the agent… (Enter to send, Shift+Enter for newline, /compact to summarize)"></textarea>
@@ -117,6 +121,15 @@ class ChatViewProvider {
   async onMessage(m) {
     switch (m.type) {
       case 'ready': {
+        // The panel (re)loaded: VS Code recreates it when the view is moved or reloaded. Rebuild it
+        // from the agent's state so a running task and any waiting prompt stay reachable.
+        if (this.agent.messages.length) {
+          this.replay();
+          this.post({ type: 'status', busy: this.agent.busy });
+          // A reply that is being written right now: show what has arrived; later text keeps appending.
+          if (typeof this.agent.streaming === 'string') { this.post({ type: 'assistantStart' }); if (this.agent.streaming) this.post({ type: 'delta', text: this.agent.streaming }); }
+          for (const req of this.pendingReqs.values()) this.post({ type: 'approval', ...req });
+        }
         this.sendConfig();
         this.refreshServerModels();
         if (!getConfig().model) this.post({ type: 'setup', ...(await this.setupState()), first: true });
@@ -265,9 +278,9 @@ class ChatViewProvider {
         for (const tc of m.tool_calls || []) {
           let args; try { args = JSON.parse(tc.function.arguments); } catch { args = tc.function.arguments; }
           if (tc.function.name === 'todo_write' && args && args.todos) todos = args.todos;
-          this.post({ type: 'tool', id: tc.id, name: tc.function.name, args });
+          this.post({ type: 'tool', id: tc.id, name: tc.function.name, args: displayArgs(args) });
           const r = results.get(tc.id);
-          if (r !== undefined) this.post({ type: 'toolResult', id: tc.id, ok: !/^(Error:|The user denied)/.test(r), output: String(r).slice(0, 8000) });
+          if (r !== undefined) this.post({ type: 'toolResult', id: tc.id, ok: !/^(Error:|The user denied)/.test(r), output: String(r).slice(0, 8000), denied: /^The user denied/.test(r) });
         }
       }
     }

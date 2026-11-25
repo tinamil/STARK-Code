@@ -31,3 +31,8 @@ test('large diffs are truncated and stay fast', () => {
   diffLines(Array.from({ length: 5000 }, (_, i) => 'a' + i).join('\n'), Array.from({ length: 5000 }, (_, i) => 'b' + i).join('\n'));
   assert.ok(Date.now() - t0 < 2000);
 });
+test('very long lines are shortened for display', () => {
+  const d = diffLines('short\n', 'x'.repeat(5000) + '\n');
+  const added = d.hunks[0].lines.find((l) => l[0] === '+')[1];
+  assert.ok(added.length < 600 && /4500 more characters/.test(added));
+});

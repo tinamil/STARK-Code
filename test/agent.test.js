@@ -44,6 +44,31 @@ test('denied action stops the turn; feedback is passed to the model', async (t) 
   assert.match(toolResults(agent)[0], /denied.*not now/);
 });
 
+test('a denial is flagged for the panel, and reply text in progress is available for a panel reload', async (t) => {
+  let seenWhileStreaming = null, agentRef;
+  const srv = await mockServer(async (req, body, res) => {
+    if (body.messages.at(-1).role === 'user' && /say/.test(body.messages.at(-1).content)) {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: 'Hello wor' } }] })}\n\n`);
+      await new Promise((r) => setTimeout(r, 150));
+      seenWhileStreaming = agentRef.streaming;
+      res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: 'ld' } }] })}\n\n`);
+      return res.end('data: [DONE]\n\n');
+    }
+    sseChat(res, [toolCall('run_command', { command: 'npm publish' })], { finish: 'tool_calls' });
+  });
+  t.after(srv.close);
+  const { agent, posts } = makeAgent({ base: srv.base, root: tempWorkspace(), approve: () => ({ decision: 'no' }) });
+  agentRef = agent;
+  await agent.run('publish it');
+  assert.strictEqual(posts.find((p) => p.type === 'toolResult').denied, true);
+  assert.ok(posts.some((p) => p.type === 'info' && p.warn && /You denied that action/.test(p.text)));
+  await agent.run('say hello');
+  assert.strictEqual(seenWhileStreaming, 'Hello wor');
+  assert.strictEqual(agent.streaming, null);
+  assert.strictEqual(agent.messages.at(-1).content, 'Hello world');
+});
+
 test('rewind restores files across turns, including deleting created files', async (t) => {
   const srv = await scriptedModel([
     toolCall('read_file', { path: 'a.txt' }), toolCall('edit_file', { path: 'a.txt', old_string: 'v1', new_string: 'v2' }), toolCall('write_file', { path: 'b.txt', content: 'new' }), { content: 'ok' },
@@ -239,4 +264,17 @@ test('locked STARK key: the error carries the unlock link (https only)', async (
   await agent.run('hi');
   assert.strictEqual(posts.find((p) => p.type === 'error').unlockUrl, undefined);
   assert.match(posts.find((p) => p.type === 'error').text, /API Keys page/);
+});
+
+test('panel shows shortened tool arguments; the model and the file get the full content', async (t) => {
+  const content = 'x'.repeat(50000);
+  const srv = await scriptedModel([toolCall('write_file', { path: 'big.txt', content })]);
+  t.after(srv.close);
+  const root = tempWorkspace();
+  const { agent, posts } = makeAgent({ base: srv.base, root });
+  await agent.run('write');
+  const shown = posts.find((p) => p.type === 'tool').args.content;
+  assert.ok(shown.length < 2100 && /48,000 more characters/.test(shown));
+  assert.strictEqual(fs.readFileSync(path.join(root, 'big.txt'), 'utf8').length, 50000);
+  assert.strictEqual(JSON.parse(agent.messages.find((m) => m.tool_calls).tool_calls[0].function.arguments).content.length, 50000);
 });

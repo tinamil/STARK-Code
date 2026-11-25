@@ -35,13 +35,16 @@
     });
     return html;
   }
-  const scroll = () => { if (log.scrollHeight - log.scrollTop - log.clientHeight < 200) log.scrollTop = log.scrollHeight; };
+  // Follow new output only while the user is at the bottom; never yank the view while they read above.
+  const nearBottom = () => log.scrollHeight - log.scrollTop - log.clientHeight < 200;
+  const scroll = () => { if (nearBottom()) log.scrollTop = log.scrollHeight; };
   function add(cls, html) {
+    const follow = nearBottom();
     const d = document.createElement('div');
     d.className = 'msg ' + cls;
     d.innerHTML = html;
     log.appendChild(d);
-    log.scrollTop = log.scrollHeight;
+    if (follow) log.scrollTop = log.scrollHeight;
     return d;
   }
   function render() {
@@ -90,16 +93,40 @@
     const next = pendingCards()[0];
     if (next && document.hasFocus()) next.querySelector('[data-a="yes"]').focus();
     else if (document.hasFocus()) input.focus();
+    updatePendingBar();
   }
+  // Keys answer a prompt only while focus is inside its card. (Elsewhere, Esc or Enter while reading
+  // a tool call must not silently deny or allow something.)
   document.addEventListener('keydown', (e) => {
-    const box = pendingCards()[0];
-    if (!box || e.isComposing) return;
-    const inFeedback = e.target.classList && e.target.classList.contains('fb');
+    if (e.isComposing) return;
+    const box = e.target.closest ? e.target.closest('.approval') : null;
+    if (!box) return;
+    const inFeedback = e.target.classList.contains('fb');
     if (e.key === 'Escape') { e.preventDefault(); answer(box, 'no'); }
     else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && box.querySelector('[data-a="diff"]')) { e.preventDefault(); answer(box, 'diff'); }
-    else if (e.key === 'Enter' && inFeedback) { e.preventDefault(); answer(e.target.closest('.approval'), e.target.value.trim() ? 'no' : 'yes'); }
-    else if (e.key === 'Enter' && e.target === document.body) { e.preventDefault(); answer(box, 'yes'); }
+    else if (e.key === 'Enter' && inFeedback) { e.preventDefault(); answer(box, e.target.value.trim() ? 'no' : 'yes'); }
   });
+
+  // A bar above the input whenever a prompt is waiting but scrolled out of view.
+  const pendingBar = $('pendingBar');
+  function showCard(box) {
+    box.scrollIntoView({ block: 'center' });
+    box.querySelector('[data-a="yes"]').focus({ preventScroll: true });
+    updatePendingBar();
+  }
+  function updatePendingBar() {
+    const box = pendingCards()[0];
+    let hidden = true;
+    if (box) {
+      const r = box.getBoundingClientRect(), l = log.getBoundingClientRect();
+      hidden = r.bottom > l.top + 20 && r.top < l.bottom - 20;   // any real part of the card is visible
+    }
+    pendingBar.hidden = hidden;
+  }
+  pendingBar.onclick = () => { const box = pendingCards()[0]; if (box) showCard(box); };
+  log.addEventListener('scroll', updatePendingBar, { passive: true });
+  log.addEventListener('toggle', updatePendingBar, true);   // <details> opened or closed
+  window.addEventListener('resize', updatePendingBar);
 
   /** Unified diff from src/diff.js: {adds, dels, hunks:[{oldStart,newStart,lines:[[op,text]]}], truncated}. */
   function renderDiff(d) {
@@ -243,14 +270,18 @@
 
   // ---------- messages from extension ----------
   window.addEventListener('message', (ev) => {
-    const m = ev.data;
+    try { handle(ev.data); }
+    catch (e) { add('error', esc(`Display problem (${ev.data && ev.data.type}): ${e.message}. If the chat looks wrong, reopen it from History.`)); }
+    updatePendingBar();
+  });
+  function handle(m) {
     switch (m.type) {
       case 'config':
         modelSel.innerHTML = (m.models.length ? m.models : [{ id: '' }]).map((x) => `<option value="${esc(x.id)}"${x.id === m.model ? ' selected' : ''}>${esc(x.id || '(no model set)')}${x.noTools ? ' (no tools)' : ''}</option>`).join('');
         modelSel.title = `${m.model} @ ${m.baseUrl} (api: ${m.apiMode}, approval: ${m.approvalMode})`;
         break;
       case 'status': setBusy(m.busy); break;
-      case 'clear': log.innerHTML = ''; $('todos').hidden = true; $('usage').textContent = ''; toolEls.clear(); break;
+      case 'clear': log.innerHTML = ''; $('todos').hidden = true; $('usage').textContent = ''; toolEls.clear(); cur = null; curText = ''; curReasoning = null; break;
       case 'user': {
         const d = add('user', `<div class="ut">${esc(m.text).replace(/\n/g, '<br>')}</div><button class="rewind" title="Rewind: restore files the agent changed since this message and edit it">↶ Rewind</button>`);
         d.querySelector('.rewind').onclick = () => vscode.postMessage({ type: 'revert', turn: m.turn });
@@ -290,8 +321,14 @@
         const d = toolEls.get(m.id);
         if (!d) break;
         d.classList.add(m.ok ? 'ok' : 'fail');
-        d.querySelector('.st').textContent = m.ok ? '✓' : '✗';
-        d.querySelector('.out').textContent = m.output;
+        const st = d.querySelector('.st'), out = d.querySelector('.out');
+        if (st) st.textContent = m.denied ? '⊘' : m.ok ? '✓' : '✗';
+        if (m.denied) {
+          d.classList.add('denied');
+          const sum = d.querySelector('summary');
+          if (sum && !sum.querySelector('.badge')) { const b = document.createElement('span'); b.className = 'badge'; b.textContent = 'Denied by you'; sum.insertBefore(b, sum.querySelector('.arg')); sum.insertBefore(document.createTextNode(' '), sum.querySelector('.arg')); }
+        }
+        if (out) out.textContent = m.output;
         const ap = d.querySelector('.approval'); if (ap) ap.remove();
         break;
       }
@@ -306,19 +343,22 @@
           ${m.diff ? renderDiff(m.diff) : `<pre>${esc(m.summary)}</pre>`}
           <input class="fb" placeholder="Feedback (Enter denies with this message)">
           <div class="btns"><button data-a="yes" class="primary">Allow</button>${m.canDiff ? '<button data-a="diff">Open in diff editor</button>' : ''}${m.allowAlways ? `<button data-a="always">${m.warning === 'This reads outside the workspace.' ? 'Always allow outside reads' : `Always allow ${esc(m.name)}`}</button>` : ''}<button data-a="no" class="deny">Deny</button></div>
-          <div class="keys">Enter allow · Esc deny${m.canDiff ? ` · ${mod}+Enter diff` : ''} · from editor: ${mod}+Alt+Y / ${mod}+Alt+N</div>`;
+          <div class="keys">Enter allow · Esc deny${m.canDiff ? ` · ${mod}+Enter diff` : ''} · from anywhere: ${mod}+Alt+Y / ${mod}+Alt+N</div>`;
         box.addEventListener('click', (e) => { const a = e.target.dataset && e.target.dataset.a; if (a) answer(box, a); });
+        const old = d.querySelector('.approval'); if (old) old.remove();   // re-sent after the panel reloaded
+        const follow = nearBottom();
         d.appendChild(box);
-        log.scrollTop = log.scrollHeight;
+        if (follow) log.scrollTop = log.scrollHeight;
         // Only take focus if the panel already has it — never steal focus from the editor.
-        if (document.hasFocus() && pendingCards()[0] === box) box.querySelector('[data-a="yes"]').focus();
+        if (document.hasFocus() && follow && pendingCards()[0] === box) box.querySelector('[data-a="yes"]').focus({ preventScroll: true });
         break;
       }
       case 'toolDiff': {
         const d = toolEls.get(m.id);
         if (!d) break;
-        d.querySelector('.arg').textContent = m.summary.replace(/^(Edit|Create|Overwrite) /, '');
         const det = d.querySelector('details');
+        if (!det) break;
+        d.querySelector('.arg').textContent = m.summary.replace(/^(Edit|Create|Overwrite) /, '');
         const args = det.querySelector('.args'); if (args) args.remove();
         const box = document.createElement('div');
         box.innerHTML = (m.explanation ? `<div class="why">${esc(m.explanation)}</div>` : '') + renderDiff(m.diff);
@@ -394,14 +434,14 @@
         $('usage').textContent = '';
         break;
       }
-      case 'info': add('info', esc(m.text)); break;
+      case 'info': add(m.warn ? 'info warn' : 'info', esc(m.text)); break;
       case 'error': {
         const d = add('error', esc(m.text));
         if (m.unlockUrl) unlockButton(d, m.unlockUrl);
         break;
       }
     }
-  });
+  }
 
   vscode.postMessage({ type: 'ready' });
 })();

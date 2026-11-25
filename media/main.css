@@ -90,3 +90,7 @@ body:not(.busy) .msg.user:hover .rewind { display: block; }
 .diff .add .sig { color: var(--vscode-gitDecoration-addedResourceForeground, #81b88b); }
 .diff .del .sig { color: var(--vscode-gitDecoration-deletedResourceForeground, #c74e39); }
 #btnCompact { font-size: 11px; padding: 2px 8px; } body.busy #btnCompact { opacity: .4; pointer-events: none; } .msg.compacted details { font-style: normal; margin-top: 4px; }
+#pendingBar { display: block; width: 100%; border-radius: 0; padding: 5px 8px; text-align: left; font-size: 12px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+.tool.denied { border-left-color: var(--vscode-editorWarning-foreground, #cca700); }
+.tool .badge { font-size: 10px; font-weight: 600; padding: 0 6px; border-radius: 8px; color: var(--vscode-editorWarning-foreground, #cca700); border: 1px solid currentColor; }
+#pendingBar[hidden] { display: none; }
