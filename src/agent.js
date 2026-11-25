@@ -10,6 +10,7 @@ const textfile = require('./textfile');
 // Rewind keeps a copy of each file before the agent first changes it in a turn; larger files are not copied.
 const MAX_CHECKPOINT_BYTES = 2 * 1024 * 1024;
 const psreadonly = require('./psreadonly');
+const { resolveShell } = require('./shell');
 
 const DEFAULT_CHARS_PER_TOKEN = 3.5;
 // Strip internal fields (prefixed with _) before sending to the API.
@@ -319,8 +320,8 @@ class Agent {
     const cwd = resolvePath(root, args.cwd || '.');
     if (readonly.classify(cmd, { root, cwd }).ok) return true;
     if (cfg.autoApproveReadOnlyScripts === false) return false;
-    const shell = cfg.shell || (process.platform === 'win32' ? (process.env.ComSpec || 'cmd.exe') : '/bin/sh');
-    const script = psreadonly.extractScript(cmd, { shell });
+    const sh = resolveShell(cfg);
+    const script = psreadonly.extractScript(cmd, { shell: sh.kind === 'powershell' ? 'powershell' : sh.kind === 'cmd' ? 'cmd.exe' : '/bin/sh' });
     if (!script) return false;
     try { return (await psreadonly.classifyPowerShell(script, { root, cwd })).ok; } catch { return false; }
   }
@@ -352,6 +353,8 @@ class Agent {
       if (diff) prep.summary = `${prep.summary} (+${diff.adds} −${diff.dels})`;
       const explanation = typeof args.explanation === 'string' ? args.explanation.slice(0, 500) : '';
       const need = this.needsApproval(tool, args, cfg, prep, root);
+      // Stopped while the checks above were running: don't show a prompt nobody will answer.
+      if (this.abort.signal.aborted) return done(false, 'Interrupted by user.');
       if (need) {
         const canDiff = typeof prep.newContent === 'string';
         if (canDiff) this.ui.registerProposal(id, { path: prep.path, newContent: prep.newContent });

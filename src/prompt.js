@@ -1,6 +1,7 @@
 const os = require('os');
 const fs = require('fs');
 const path = require('path');
+const { resolveShell } = require('./shell');
 
 const INSTRUCTION_FILES = ['AGENTS.md', 'CLAUDE.md', '.github/copilot-instructions.md', '.oai-agent.md'];
 
@@ -48,17 +49,16 @@ function projectFacts(root) {
   return facts;
 }
 
-function shellNotes(shell) {
-  const s = shell.toLowerCase();
-  if (process.platform === 'win32' && /cmd(\.exe)?$/.test(s)) {
-    return `Commands run in cmd.exe. For PowerShell, wrap the command: powershell -NoProfile -Command "...". Use Windows paths or forward slashes; there is no bash, grep, sed or cat unless the user installed them.`;
+function shellNotes(sh) {
+  if (sh.kind === 'powershell') {
+    return `Commands run in ${sh.name}. Use PowerShell syntax and cmdlets. Put ; between commands. Call programs such as git, npm, node and python directly.`;
   }
-  if (/pwsh|powershell/.test(s)) return 'Commands run in PowerShell. Use PowerShell syntax (Get-Content, Get-ChildItem, Select-String).';
-  return `Commands run in ${shell}.`;
+  if (sh.kind === 'cmd') return 'Commands run in cmd.exe. Use Windows paths or forward slashes. For PowerShell, wrap the command: powershell -NoProfile -Command "...".';
+  return `Commands run in ${sh.name}.`;
 }
 
 function buildSystemPrompt(root, cfg) {
-  const shell = cfg.shell || (process.platform === 'win32' ? (process.env.ComSpec || 'cmd.exe') : (process.env.SHELL || '/bin/sh'));
+  const shell = resolveShell(cfg);
   const osName = process.platform === 'win32' ? `Windows (${os.release()})` : process.platform === 'darwin' ? `macOS (${os.release()})` : `${os.platform()} ${os.release()}`;
   const instr = loadProjectInstructions(root);
   return `You are a coding agent working inside the user's VS Code workspace. You complete software tasks end to end: you investigate the code, make the changes, verify them, and report back. You act through tools; the user approves risky actions in the VS Code UI.
