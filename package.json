@@ -3,7 +3,7 @@
   "displayName": "STARK Code",
   "description": "Coding agent for VS Code that works with the STARK API gateway and other OpenAI-compatible endpoints.",
   "publisher": "local",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "license": "MIT",
   "engines": {
     "vscode": "^1.85.0"
@@ -34,6 +34,10 @@
       ]
     },
     "commands": [
+      {
+        "command": "oaiAgent.open",
+        "title": "STARK Code: Open Chat"
+      },
       {
         "command": "oaiAgent.setApiKey",
         "title": "STARK Code: Set API Key"
@@ -173,6 +177,10 @@
       }
     },
     "keybindings": [
+      {
+        "command": "oaiAgent.open",
+        "key": "ctrl+alt+s"
+      },
       {
         "command": "oaiAgent.approve",
         "key": "ctrl+alt+y",

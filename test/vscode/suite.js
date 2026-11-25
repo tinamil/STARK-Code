@@ -46,12 +46,12 @@ exports.run = async function run() {
 
   test('activation: commands, settings defaults and the panel view', async () => {
     const cmds = await vscode.commands.getCommands(true);
-    for (const c of ['oaiAgent.setApiKey', 'oaiAgent.newChat', 'oaiAgent.stop', 'oaiAgent.approve', 'oaiAgent.deny']) assert.ok(cmds.includes(c), `command ${c}`);
+    for (const c of ['oaiAgent.open', 'oaiAgent.setApiKey', 'oaiAgent.newChat', 'oaiAgent.stop', 'oaiAgent.approve', 'oaiAgent.deny']) assert.ok(cmds.includes(c), `command ${c}`);
     assert.strictEqual(cfg.get('baseUrl'), 'https://api.genai.mil/v1');
     assert.strictEqual(cfg.get('contextWindow'), 1000000);
     assert.deepStrictEqual([cfg.get('compactAt'), cfg.get('compactTo')], [50000, 10000]);
-    await vscode.commands.executeCommand('oaiAgent.chat.focus');
-    await until(() => provider.view, 'the panel to open');
+    await vscode.commands.executeCommand('oaiAgent.open');
+    await until(() => provider.view && provider.view.visible, 'the panel to open');
     assert.match(provider.view.webview.html, /id="pendingBar"/);
     assert.match(provider.view.webview.html, /Content-Security-Policy/);
   });

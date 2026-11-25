@@ -13,6 +13,9 @@ Open the robot icon in the left sidebar. On first run the **Setup** panel opens:
 
 Switch models from the dropdown at the top. It lists models the server reports plus `oaiAgent.models`.
 
+## Finding the panel
+If you lose the panel (for example after closing the side bar it was docked in), click **STARK Code** in the status bar, press Ctrl+Alt+S, or run **STARK Code: Open Chat** from the Command Palette.
+
 ## Tools
 read_file, write_file, edit_file, list_dir, glob, grep (uses VS Code's bundled ripgrep), run_command, web_fetch, todo_write.
 

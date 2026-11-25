@@ -307,7 +307,15 @@ ${panelBody()}
 
 function activate(context) {
   const provider = new ChatViewProvider(context);
+  // Always-visible way back to the panel, wherever it is docked or hidden.
+  const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+  status.text = '$(comment-discussion) STARK Code';
+  status.tooltip = 'Open the STARK Code chat (Ctrl+Alt+S)';
+  status.command = 'oaiAgent.open';
+  status.show();
   context.subscriptions.push(
+    status,
+    vscode.commands.registerCommand('oaiAgent.open', () => vscode.commands.executeCommand('oaiAgent.chat.focus')),
     vscode.window.registerWebviewViewProvider('oaiAgent.chat', provider, { webviewOptions: { retainContextWhenHidden: true } }),
     vscode.workspace.registerTextDocumentContentProvider(PROPOSED_SCHEME, provider.proposedProvider),
     vscode.commands.registerCommand('oaiAgent.setApiKey', async () => {
