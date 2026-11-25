@@ -126,6 +126,8 @@ class ChatViewProvider {
         if (this.agent.messages.length) {
           this.replay();
           this.post({ type: 'status', busy: this.agent.busy });
+          // A reply that is being written right now: show what has arrived; later text keeps appending.
+          if (typeof this.agent.streaming === 'string') { this.post({ type: 'assistantStart' }); if (this.agent.streaming) this.post({ type: 'delta', text: this.agent.streaming }); }
           for (const req of this.pendingReqs.values()) this.post({ type: 'approval', ...req });
         }
         this.sendConfig();
@@ -278,7 +280,7 @@ class ChatViewProvider {
           if (tc.function.name === 'todo_write' && args && args.todos) todos = args.todos;
           this.post({ type: 'tool', id: tc.id, name: tc.function.name, args: displayArgs(args) });
           const r = results.get(tc.id);
-          if (r !== undefined) this.post({ type: 'toolResult', id: tc.id, ok: !/^(Error:|The user denied)/.test(r), output: String(r).slice(0, 8000) });
+          if (r !== undefined) this.post({ type: 'toolResult', id: tc.id, ok: !/^(Error:|The user denied)/.test(r), output: String(r).slice(0, 8000), denied: /^The user denied/.test(r) });
         }
       }
     }
