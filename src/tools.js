@@ -3,7 +3,7 @@ const fsp = require('fs/promises');
 const path = require('path');
 const { spawn, execFileSync } = require('child_process');
 const textfile = require('./textfile');
-const { resolveShell, powerShellArgs } = require('./shell');
+const { resolveShell, powerShellArgs, decodeCliXml } = require('./shell');
 
 const SKIP_DIRS = new Set(['node_modules', '.git', '.hg', '.svn', 'dist', 'build', 'out', '.next', '__pycache__', '.venv', 'venv', 'target', '.idea']);
 
@@ -301,7 +301,8 @@ const TOOLS = [
         const finish = (code, extra) => {
           if (done) return; done = true;
           clearTimeout(timer); ctx.signal && ctx.signal.removeEventListener('abort', onAbort);
-          const clean = out.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '');
+          let clean = out.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '');
+          if (sh.kind === 'powershell') clean = decodeCliXml(clean);
           let status = timedOut ? `Timed out after ${timeout}ms (process killed)` : ctx.signal && ctx.signal.aborted ? 'Interrupted by user' : `Exit code: ${code}`;
           if (extra) status += ` (${extra})`;
           resolve(`${status}\n${clean.trim() ? clean : '(no output)'}`);

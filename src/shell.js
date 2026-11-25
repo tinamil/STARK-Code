@@ -39,4 +39,21 @@ function powerShellArgs(command) {
   return ['-NoProfile', '-NonInteractive', '-NoLogo', '-OutputFormat', 'Text', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')];
 }
 
-module.exports = { resolveShell, powerShellArgs };
+/**
+ * Windows PowerShell 5.1 writes its own errors and warnings to stderr as an XML block
+ * ("#< CLIXML <Objs>…</Objs>") when started this way. Turn those blocks back into plain text.
+ */
+function decodeCliXml(text) {
+  if (!text.includes('#< CLIXML')) return text;
+  const unescape = (s) => s
+    .replace(/_x([0-9A-Fa-f]{4})_/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
+  return text.replace(/#< CLIXML\s*(<Objs[\s\S]*?<\/Objs>|<Objs[^>]*\/>)?/g, (_, xml) => {
+    if (!xml) return '';
+    let out = '';
+    for (const m of xml.matchAll(/<S S="(?:Error|Warning|Verbose|Debug|Information)">([\s\S]*?)<\/S>/g)) out += unescape(m[1]);
+    return out.replace(/\r\n/g, '\n');
+  });
+}
+
+module.exports = { resolveShell, powerShellArgs, decodeCliXml };

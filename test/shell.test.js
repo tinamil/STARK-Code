@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { resolveShell } = require('../src/shell');
+const { resolveShell, decodeCliXml } = require('../src/shell');
 const { findPowerShell } = require('../src/psreadonly');
 const { getTool } = require('../src/tools');
 const { buildSystemPrompt } = require('../src/prompt');
@@ -20,6 +20,14 @@ test('the system prompt tells the model which shell it has', () => {
   const root = tempWorkspace();
   assert.match(buildSystemPrompt(root, { shell: 'pwsh' }), /- Shell: Commands run in PowerShell\. Use PowerShell syntax and cmdlets\./);
   assert.match(buildSystemPrompt(root, { shell: 'cmd.exe' }), /- Shell: Commands run in cmd\.exe\./);
+});
+
+test('Windows PowerShell 5.1 error blocks (CLIXML) are turned back into plain text', () => {
+  // The exact shape captured from Windows PowerShell 5.1 in CI.
+  const raw = 'before\r\n#< CLIXML\r\n<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><S S="Error">Get-Content : Cannot find path \'C:\\t\\missing-file.txt\' because it _x000D__x000A_</S><S S="Error">does not exist &amp; &lt;gone&gt;._x000D__x000A_</S><Obj S="progress" RefId="0"><TN RefId="0"><T>System.Management.Automation.PSCustomObject</T></TN></Obj></Objs>after';
+  assert.strictEqual(decodeCliXml(raw), "before\r\nGet-Content : Cannot find path 'C:\\t\\missing-file.txt' because it \ndoes not exist & <gone>.\nafter");
+  assert.strictEqual(decodeCliXml('plain output'), 'plain output');
+  assert.strictEqual(decodeCliXml('#< CLIXML\r\n'), '');
 });
 
 // PowerShell as the command shell: every PowerShell found on this machine (CI adds Windows PowerShell 5.1).
