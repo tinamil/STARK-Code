@@ -193,7 +193,8 @@
   },
   "scripts": {
     "test": "node --test \"test/**/*.test.js\"",
-    "test:vscode": "node test/vscode/run.js"
+    "test:vscode": "node test/vscode/run.js",
+    "eval": "node eval/run.js"
   },
   "devDependencies": {
     "@vscode/test-electron": "3.1.0",
