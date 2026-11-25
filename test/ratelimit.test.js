@@ -21,7 +21,7 @@ test('connection test reports the rate limits', async (t) => {
     sseChat(res, [toolCall('get_weather', { city: 'Paris' })], { finish: 'tool_calls', headers: limits() });
   });
   t.after(srv.close);
-  const r = await testConnection({ apiMode: 'chat', baseUrl: srv.base, model: 'm' });
+  const r = await testConnection({ baseUrl: srv.base, model: 'm' });
   assert.ok(r.lines.some((l) => l === '• Rate limits: 500,000 tokens/minute, 120 requests/minute'), r.lines.join('\n'));
 });
 

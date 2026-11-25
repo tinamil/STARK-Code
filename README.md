@@ -28,9 +28,6 @@ The window is also capped at about 90% of the gateway's tokens-per-minute limit 
 ## Compacting
 Type `/compact` (or click **Compact**) to summarize the conversation now and free up context, for example before starting a new task in the same chat. Add a note on what to keep: `/compact keep the API design decisions`. The summary is shown and can be expanded. Files, and Rewind for earlier edits, are unaffected. The agent also summarizes older steps automatically as it goes (see Context size).
 
-## API mode
-`oaiAgent.apiMode` can be `chat` (`/chat/completions`) or `responses` (`/responses`, stateless with `store:false`). Some gateways pass tool definitions through only one of these. **Test connection** checks the selected mode and falls back to the other if tool calling fails.
-
 ## Locked or expired keys
 STARK locks API keys 14 days after they're created or unlocked. When that happens, the agent says so and shows an **Unlock API key** button that opens the unlock page from STARK's error response in your browser. Unlock the key, then send "continue". A key that is invalid or expired gets a different message telling you to update it under Setup. The connection test reports both cases.
 
@@ -76,7 +73,7 @@ On Windows, commands run in PowerShell: PowerShell 7 if it is installed, otherwi
 - These always ask, even in `auto` mode, and never offer "Always allow":
   - destructive commands (`rm -rf`, `git push --force`, `git reset --hard`, `DROP TABLE`, `sudo`, `terraform destroy` and similar)
   - edits to files outside the workspace
-- `autoApproveCommands` lists command prefixes that run without asking. Commands that contain `; & | $ < >` or a backtick always ask.
+- `autoApproveCommands` (empty by default) lists extra command prefixes that run without asking, such as `npm test`. Commands that contain `; & | $ < >` or a backtick always ask.
 
 ## Project instructions
 These files at the workspace root are added to the system prompt: `AGENTS.md`, `CLAUDE.md`, `.github/copilot-instructions.md` and `.oai-agent.md`.

@@ -166,7 +166,6 @@
   function showSetup(m) {
     panel.dataset.kind = 'setup'; panel.hidden = false;
     panel.innerHTML = `<div class="ptitle">${m.first ? 'Welcome. Connect a model to get started.' : 'Connection'}</div>
-      <label>API<select id="sApi"><option value="chat">Chat Completions (/chat/completions)</option><option value="responses">Responses (/responses)</option></select></label>
       <label>Base URL<input id="sBase" value="${esc(m.baseUrl || '')}" placeholder="https://api.genai.mil/v1"></label>
       <label>API key<input id="sKey" type="password" placeholder="${m.hasKey ? '•••••• (saved, leave blank to keep)' : 'optional for local servers'}"></label>
       <div class="field"><label for="sModel">Model</label>
@@ -177,8 +176,7 @@
       <label>Context window (tokens)<input id="sCtx" type="number" value="${m.contextWindow || 1000000}"></label>
       <div class="btns"><button id="sTest">Test connection</button><button id="sSave" class="primary">Save</button><span class="sp"></span>${m.hasKey ? '<button id="sClear" title="Delete saved key">Clear key</button>' : ''}<button id="sMore">All settings</button></div>
       <pre id="sOut" hidden></pre>`;
-    $('sApi').value = m.apiMode || 'chat';
-    const vals = () => ({ apiMode: $('sApi').value, baseUrl: $('sBase').value.trim(), model: $('sModel').value.trim(), apiKey: $('sKey').value, contextWindow: $('sCtx').value });
+    const vals = () => ({ baseUrl: $('sBase').value.trim(), model: $('sModel').value.trim(), apiKey: $('sKey').value, contextWindow: $('sCtx').value });
     combo.models = []; combo.state = 'loading'; combo.error = '';
     const loadModels = () => { combo.state = 'loading'; updateHint(); vscode.postMessage({ type: 'fetchModels', ...vals() }); };
     combo.load = loadModels;
@@ -287,7 +285,7 @@
     switch (m.type) {
       case 'config':
         modelSel.innerHTML = (m.models.length ? m.models : [{ id: '' }]).map((x) => `<option value="${esc(x.id)}"${x.id === m.model ? ' selected' : ''}>${esc(x.id || '(no model set)')}${x.noTools ? ' (no tools)' : ''}</option>`).join('');
-        modelSel.title = `${m.model} @ ${m.baseUrl} (api: ${m.apiMode}, approval: ${m.approvalMode})`;
+        modelSel.title = `${m.model} @ ${m.baseUrl} (approval: ${m.approvalMode})`;
         break;
       case 'status': setBusy(m.busy); break;
       case 'clear': log.innerHTML = ''; $('todos').hidden = true; $('usage').textContent = ''; toolEls.clear(); cur = null; curText = ''; curReasoning = null; break;
@@ -454,10 +452,9 @@
         const o = $('sOut'); if (!o) break;
         o.hidden = false;
         o.className = m.running ? '' : m.ok ? 'good' : 'bad';
-        o.textContent = m.running ? 'Testing… (sends one or two small requests)' : m.lines.join('\n');
+        o.textContent = m.running ? 'Testing… (sends two small requests)' : m.lines.join('\n');
         const oldU = o.parentNode.querySelector('.unlock'); if (oldU) oldU.remove();
         if (m.unlockUrl) { const holder = document.createElement('div'); o.after(holder); unlockButton(holder, m.unlockUrl); holder.replaceWith(...holder.childNodes); }
-        if (m.suggestMode && $('sApi')) { $('sApi').value = m.suggestMode; o.textContent += `\n\nAPI switched to "${m.suggestMode}". Click Save to keep it.`; }
         break;
       }
       case 'history': showHistory(m.items); break;

@@ -10,7 +10,7 @@ const ui = (name, fn) => test(name, { skip }, async () => {
   const p = await openPanel();
   try { await fn(p); assert.deepStrictEqual(p.errors, [], 'no script errors in the panel'); } finally { await p.close(); }
 });
-const config = { type: 'config', model: 'model-a', baseUrl: 'https://x/v1', approvalMode: 'ask', apiMode: 'chat', models: [{ id: 'model-a' }, { id: 'model-b' }, { id: 'tiny', noTools: true }] };
+const config = { type: 'config', model: 'model-a', baseUrl: 'https://x/v1', approvalMode: 'ask', models: [{ id: 'model-a' }, { id: 'model-b' }, { id: 'tiny', noTools: true }] };
 const approval = (id, extra = {}) => ({ type: 'approval', id, name: 'run_command', summary: 'npm test', allowAlways: true, ...extra });
 const tool = (id, name = 'run_command', args = { command: 'npm test' }) => ({ type: 'tool', id, name, args });
 const big = Array.from({ length: 400 }, (_, i) => `line ${i} of output`).join('\n');
@@ -102,7 +102,7 @@ ui('streaming text renders markdown safely; a bad message is reported and later 
 });
 
 ui('setup: model picker lists names under the field, filters, and is keyboard driven', async ({ page, send, sent }) => {
-  await send({ type: 'setup', baseUrl: 'https://x/v1', model: '', hasKey: true, apiMode: 'chat', contextWindow: 1000000 });
+  await send({ type: 'setup', baseUrl: 'https://x/v1', model: '', hasKey: true, contextWindow: 1000000 });
   await send({ type: 'setupModels', models: [{ id: 'gemini-flash', tools: false }, { id: 'gemini-flash-withtools', tools: true }, { id: 'gemini-lite-withtools', tools: true }] });
   await page.click('#sModel');
   assert.deepStrictEqual(await page.$$eval('#sList .cname', (o) => o.map((x) => x.textContent)), ['gemini-flash-withtools', 'gemini-lite-withtools', 'gemini-flash']);
@@ -117,7 +117,7 @@ ui('setup: model picker lists names under the field, filters, and is keyboard dr
   assert.match(await page.textContent('#sHint'), /does not support tool calling/);
   await sent();
   await page.click('#sSave');
-  assert.deepStrictEqual((await sent()).map((m) => [m.type, m.model, m.apiMode]), [['saveSetup', 'gemini-flash', 'chat']]);
+  assert.deepStrictEqual((await sent()).map((m) => [m.type, m.model]), [['saveSetup', 'gemini-flash']]);
   await send({ type: 'testResult', ok: false, lines: ['✗ Your API key is locked.'], unlockUrl: 'https://portal.example/unlock/1' });
   await send({ type: 'testResult', ok: false, lines: ['✗ Your API key is locked.'], unlockUrl: 'https://portal.example/unlock/1' });
   assert.strictEqual(await page.locator('#panel .unlock button').count(), 1);

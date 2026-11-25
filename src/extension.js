@@ -12,7 +12,7 @@ const PROPOSED_SCHEME = 'oai-agent-proposed';
 
 function getConfig() {
   const c = vscode.workspace.getConfiguration('oaiAgent');
-  const keys = ['apiMode', 'baseUrl', 'model', 'models', 'contextWindow', 'compactAt', 'compactTo', 'maxTokens', 'temperature', 'maxSteps', 'approvalMode',
+  const keys = ['baseUrl', 'model', 'models', 'contextWindow', 'compactAt', 'compactTo', 'maxTokens', 'temperature', 'maxSteps', 'approvalMode',
     'autoApproveCommands', 'autoApproveReadOnlyCommands', 'autoApproveReadOnlyScripts', 'shell', 'commandTimeoutMs', 'maxToolOutputChars', 'extraHeaders', 'extraBody', 'customInstructions'];
   const o = {};
   for (const k of keys) o[k] = c.get(k);
@@ -87,7 +87,7 @@ class ChatViewProvider {
     const noTools = new Set(this.serverModels.filter((m) => m.tools === false).map((m) => m.id));
     const ids = [...new Set([c.model, ...(c.models || []), ...this.serverModels.map((m) => m.id)].filter(Boolean))];
     const models = ids.map((id) => ({ id, noTools: noTools.has(id) }));
-    this.post({ type: 'config', model: c.model, baseUrl: c.baseUrl, models, approvalMode: c.approvalMode, apiMode: c.apiMode });
+    this.post({ type: 'config', model: c.model, baseUrl: c.baseUrl, models, approvalMode: c.approvalMode });
   }
   async refreshServerModels() {
     try { this.serverModels = await listModels({ baseUrl: getConfig().baseUrl, apiKey: await this.getKey(), headers: getConfig().extraHeaders }); }
@@ -160,7 +160,7 @@ ${panelBody()}
       case 'testSetup': {
         this.post({ type: 'testResult', running: true });
         const apiKey = m.apiKey !== undefined && m.apiKey !== '' ? m.apiKey : await this.getKey();
-        const r = await testConnection({ apiMode: m.apiMode, baseUrl: m.baseUrl, model: m.model, apiKey, headers: getConfig().extraHeaders, extraBody: getConfig().extraBody });
+        const r = await testConnection({ baseUrl: m.baseUrl, model: m.model, apiKey, headers: getConfig().extraHeaders, extraBody: getConfig().extraBody });
         this.post({ type: 'testResult', ...r });
         break;
       }
@@ -174,7 +174,6 @@ ${panelBody()}
         const c = vscode.workspace.getConfiguration('oaiAgent');
         await c.update('baseUrl', m.baseUrl, vscode.ConfigurationTarget.Global);
         await c.update('model', m.model, vscode.ConfigurationTarget.Global);
-        if (m.apiMode) await c.update('apiMode', m.apiMode, vscode.ConfigurationTarget.Global);
         // Only store the context window when it differs, so the default can change in later versions.
         if (m.contextWindow && Number(m.contextWindow) !== c.get('contextWindow')) await c.update('contextWindow', Number(m.contextWindow), vscode.ConfigurationTarget.Global);
         if (m.apiKey === null) await this.context.secrets.delete(SECRET_KEY);
@@ -204,7 +203,7 @@ ${panelBody()}
 
   async setupState() {
     const c = getConfig();
-    return { apiMode: c.apiMode, baseUrl: c.baseUrl, model: c.model, contextWindow: c.contextWindow, hasKey: !!(await this.getKey()) };
+    return { baseUrl: c.baseUrl, model: c.model, contextWindow: c.contextWindow, hasKey: !!(await this.getKey()) };
   }
 
   editorContext() {
@@ -306,28 +305,7 @@ ${panelBody()}
   }
 }
 
-/** v0.3.0's Setup list could save the literal text "[object Object]" as the model; clear it. */
-async function repairBadModelSetting() {
-  const c = vscode.workspace.getConfiguration('oaiAgent');
-  const info = c.inspect('model') || {};
-  const bad = (v) => typeof v === 'string' && v.includes('[object Object]');
-  if (bad(info.globalValue)) await c.update('model', undefined, vscode.ConfigurationTarget.Global);
-  if (bad(info.workspaceValue)) await c.update('model', undefined, vscode.ConfigurationTarget.Workspace);
-  const models = c.get('models') || [];
-  if (models.some(bad)) await c.update('models', models.filter((m) => !bad(m)), vscode.ConfigurationTarget.Global);
-}
-
-/** Setup used to store the old 32000 default whenever it was saved; clear that once so the new default applies. */
-async function migrateContextWindow(context) {
-  if (context.globalState.get('migratedContextWindow')) return;
-  const c = vscode.workspace.getConfiguration('oaiAgent');
-  if ((c.inspect('contextWindow') || {}).globalValue === 32000) await c.update('contextWindow', undefined, vscode.ConfigurationTarget.Global);
-  await context.globalState.update('migratedContextWindow', true);
-}
-
 function activate(context) {
-  repairBadModelSetting().catch(() => {});
-  migrateContextWindow(context).catch(() => {});
   const provider = new ChatViewProvider(context);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider('oaiAgent.chat', provider, { webviewOptions: { retainContextWhenHidden: true } }),

@@ -3,7 +3,7 @@
   "displayName": "STARK Code",
   "description": "Coding agent for VS Code that works with the STARK API gateway and other OpenAI-compatible endpoints.",
   "publisher": "local",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "license": "MIT",
   "engines": {
     "vscode": "^1.85.0"
@@ -58,19 +58,6 @@
     "configuration": {
       "title": "STARK Code",
       "properties": {
-        "oaiAgent.apiMode": {
-          "type": "string",
-          "enum": [
-            "chat",
-            "responses"
-          ],
-          "default": "chat",
-          "enumDescriptions": [
-            "POST {baseUrl}/chat/completions",
-            "POST {baseUrl}/responses (OpenAI Responses API, stateless)"
-          ],
-          "description": "Which OpenAI-compatible API to use. Use 'responses' if your gateway only passes tool definitions through /responses."
-        },
         "oaiAgent.baseUrl": {
           "type": "string",
           "default": "https://api.genai.mil/v1",
@@ -141,14 +128,8 @@
           "items": {
             "type": "string"
           },
-          "default": [
-            "ls",
-            "pwd",
-            "git status",
-            "git diff",
-            "git log"
-          ],
-          "description": "Command prefixes that run without asking."
+          "default": [],
+          "description": "Extra command prefixes that run without asking, for example \"npm test\". Read-only commands (git status, Get-Content, ls\u2026) already run without asking; add only commands you trust to run unattended. Commands with pipes, chaining or redirects always ask."
         },
         "oaiAgent.autoApproveReadOnlyCommands": {
           "type": "boolean",
