@@ -84,7 +84,11 @@
   }
   // The button is Stop while the agent works; Enter in the box queues a message instead.
   send.onclick = () => (busy ? vscode.postMessage({ type: 'stop' }) : submit());
+  let lastTyped = 0;
+  // True while the user is writing a message: a prompt that appears now must not take the keyboard.
+  const composing = () => document.activeElement === input && (input.value.trim() !== '' || Date.now() - lastTyped < 2000);
   input.addEventListener('keydown', (e) => {
+    lastTyped = Date.now();
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); submit(); }
   });
   $('btnNew').onclick = () => vscode.postMessage({ type: 'new' });
@@ -95,12 +99,18 @@
 
   // ---------- approvals ----------
   const pendingCards = () => [...document.querySelectorAll('.approval')];
+  // A card that takes focus ignores Enter/Space on Allow for a moment, in case a key was already on its way.
+  const FOCUS_GRACE_MS = 500;
+  function focusCard(box) {
+    box.dataset.focusedAt = Date.now();
+    box.querySelector('[data-a="yes"]').focus({ preventScroll: true });
+  }
   function answer(box, decision) {
     if (decision === 'diff') { vscode.postMessage({ type: 'diff', id: box.dataset.id }); return; }
     vscode.postMessage({ type: 'approve', id: box.dataset.id, decision, feedback: box.querySelector('.fb').value });
     box.remove();
     const next = pendingCards()[0];
-    if (next && document.hasFocus()) next.querySelector('[data-a="yes"]').focus();
+    if (next && document.hasFocus()) focusCard(next);
     else if (document.hasFocus()) input.focus();
     updatePendingBar();
   }
@@ -120,7 +130,7 @@
   const pendingBar = $('pendingBar');
   function showCard(box) {
     box.scrollIntoView({ block: 'center' });
-    box.querySelector('[data-a="yes"]').focus({ preventScroll: true });
+    box.querySelector('[data-a="yes"]').focus({ preventScroll: true });   // asked for by the user: no grace period
     updatePendingBar();
   }
   function updatePendingBar() {
@@ -396,13 +406,20 @@
           <input class="fb" placeholder="Feedback (Enter denies with this message)">
           <div class="btns"><button data-a="yes" class="primary">Allow</button>${m.canDiff ? '<button data-a="diff">Open in diff editor</button>' : ''}${m.allowAlways ? `<button data-a="always">${m.warning === 'This reads outside the workspace.' ? 'Always allow outside reads' : `Always allow ${esc(m.name)}`}</button>` : ''}<button data-a="no" class="deny">Deny</button></div>
           <div class="keys">Enter allow · Esc deny${m.canDiff ? ` · ${mod}+Enter diff` : ''} · from anywhere: ${mod}+Alt+Y / ${mod}+Alt+N</div>`;
-        box.addEventListener('click', (e) => { const a = e.target.dataset && e.target.dataset.a; if (a) answer(box, a); });
+        box.addEventListener('click', (e) => {
+          const a = e.target.dataset && e.target.dataset.a;
+          if (!a) return;
+          // e.detail is 0 for a click made with Enter or Space.
+          const byKey = e.detail === 0;
+          if (byKey && a !== 'no' && a !== 'diff' && Date.now() - Number(box.dataset.focusedAt || 0) < FOCUS_GRACE_MS) return;
+          answer(box, a);
+        });
         const old = d.querySelector('.approval'); if (old) old.remove();   // re-sent after the panel reloaded
         const follow = nearBottom();
         d.appendChild(box);
         if (follow) log.scrollTop = log.scrollHeight;
-        // Only take focus if the panel already has it — never steal focus from the editor.
-        if (document.hasFocus() && follow && pendingCards()[0] === box) box.querySelector('[data-a="yes"]').focus({ preventScroll: true });
+        // Only take focus if the panel already has it — never steal focus from the editor, or from a message being typed.
+        if (document.hasFocus() && follow && pendingCards()[0] === box && !composing()) focusCard(box);
         break;
       }
       case 'toolDiff': {
