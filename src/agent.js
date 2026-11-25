@@ -66,6 +66,7 @@ class Agent {
     this.sessionAllowed = new Set();
     this.busy = false;
     this.abort = null;
+    this.streaming = null;
   }
 
   stop() { if (this.abort) this.abort.abort(); }
@@ -204,11 +205,12 @@ class Agent {
       await this.maybeCompact(cfg);
 
       let partial = '';
+      this.streaming = '';   // reply text so far, so a reloaded panel can show it
       this.ui.post({ type: 'assistantStart' });
       let r;
       try {
         r = await this.callModel(cfg, this.messages, true,
-          (t) => { partial += t; this.ui.post({ type: 'delta', text: t }); },
+          (t) => { partial += t; this.streaming = partial; this.ui.post({ type: 'delta', text: t }); },
           (t) => this.ui.post({ type: 'reasoning', text: t }));
       } catch (e) {
         if (signal.aborted && partial) this.messages.push({ role: 'assistant', content: partial + '\n[interrupted by user]' });
@@ -228,6 +230,7 @@ class Agent {
         }
         throw e;
       } finally {
+        this.streaming = null;
         this.ui.post({ type: 'assistantEnd' });
       }
       this.overflowRetries = 0;
@@ -263,7 +266,7 @@ class Agent {
       }
       if (signal.aborted) throw new Error('aborted');
       if (stopAfter) {
-        this.ui.post({ type: 'info', text: 'Action denied. Tell the agent what to do instead.' });
+        this.ui.post({ type: 'info', warn: true, text: 'You denied that action, so the agent stopped. Tell it what to do instead.' });
         return;
       }
     }
@@ -329,7 +332,7 @@ class Agent {
     try { args = tc.function.arguments ? JSON.parse(tc.function.arguments) : {}; }
     catch { args = null; }
     this.ui.post({ type: 'tool', id, name, args: displayArgs(args || tc.function.arguments) });
-    const done = (ok, output, extra = {}) => { this.ui.post({ type: 'toolResult', id, ok, output: String(output).slice(0, 8000) }); return { output, ...extra }; };
+    const done = (ok, output, extra = {}) => { this.ui.post({ type: 'toolResult', id, ok, output: String(output).slice(0, 8000), denied: !!extra.denied }); return { output, ...extra }; };
 
     if (!tool) return done(false, `Error: unknown tool "${name}".`);
     if (!args || typeof args !== 'object') return done(false, `Error: arguments for ${name} were not valid JSON: ${tc.function.arguments}`);

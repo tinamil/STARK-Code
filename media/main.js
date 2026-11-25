@@ -322,7 +322,12 @@
         if (!d) break;
         d.classList.add(m.ok ? 'ok' : 'fail');
         const st = d.querySelector('.st'), out = d.querySelector('.out');
-        if (st) st.textContent = m.ok ? '✓' : '✗';
+        if (st) st.textContent = m.denied ? '⊘' : m.ok ? '✓' : '✗';
+        if (m.denied) {
+          d.classList.add('denied');
+          const sum = d.querySelector('summary');
+          if (sum && !sum.querySelector('.badge')) { const b = document.createElement('span'); b.className = 'badge'; b.textContent = 'Denied by you'; sum.insertBefore(b, sum.querySelector('.arg')); sum.insertBefore(document.createTextNode(' '), sum.querySelector('.arg')); }
+        }
         if (out) out.textContent = m.output;
         const ap = d.querySelector('.approval'); if (ap) ap.remove();
         break;
@@ -429,7 +434,7 @@
         $('usage').textContent = '';
         break;
       }
-      case 'info': add('info', esc(m.text)); break;
+      case 'info': add(m.warn ? 'info warn' : 'info', esc(m.text)); break;
       case 'error': {
         const d = add('error', esc(m.text));
         if (m.unlockUrl) unlockButton(d, m.unlockUrl);
