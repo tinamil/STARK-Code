@@ -49,6 +49,7 @@ class ChatViewProvider {
         log: (t) => this.output.append(t),
         registerProposal: (id, p) => this.proposals.set(id, p),
         approve: (req) => new Promise((resolve) => {
+          if (this.agent.abort && this.agent.abort.signal.aborted) { resolve({ decision: 'no' }); return; }
           this.pending.set(req.id, resolve);
           this.pendingReqs.set(req.id, req);
           this.updateApprovalContext();

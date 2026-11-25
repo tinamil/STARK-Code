@@ -460,3 +460,17 @@ test('a running command streams its output to the panel before it finishes', asy
   assert.match(posts.filter((p) => p.type === 'toolOutput').map((p) => p.text).join(''), /first/);
   assert.match(posts[result].output, /first[\s\S]*second/);
 });
+
+test('Stop during the slow read-only check: no approval prompt is shown and the run ends', async (t) => {
+  const srv = await scriptedModel([toolCall('run_command', { command: 'npm test' })]);
+  t.after(srv.close);
+  const { agent, approvals } = makeAgent({ base: srv.base, root: tempWorkspace() });
+  // Stand-in for the PowerShell analysis taking a while (it does on Windows).
+  agent.isReadOnlyCommand = async () => { await new Promise((r) => setTimeout(r, 300)); return false; };
+  const run = agent.run('go');
+  await new Promise((r) => setTimeout(r, 150));
+  agent.stop();
+  await Promise.race([run, new Promise((_, rej) => setTimeout(() => rej(new Error('run did not end after Stop')), 5000))]);
+  assert.strictEqual(approvals.length, 0);
+  assert.strictEqual(agent.busy, false);
+});
