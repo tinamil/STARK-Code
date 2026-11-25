@@ -122,6 +122,7 @@ ${panelBody()}
           // A reply that is being written right now: show what has arrived; later text keeps appending.
           if (typeof this.agent.streaming === 'string') { this.post({ type: 'assistantStart' }); if (this.agent.streaming) this.post({ type: 'delta', text: this.agent.streaming }); }
           for (const req of this.pendingReqs.values()) this.post({ type: 'approval', ...req });
+          for (const q of this.agent.queued) this.post({ type: 'queued', id: q.id, text: q.display });
         }
         this.sendConfig();
         this.refreshServerModels();
@@ -135,6 +136,14 @@ ${panelBody()}
         await this.saveChat();
         break;
       }
+      case 'queue': {
+        // Typed while the agent works: delivered after the current step. If it just finished, send normally.
+        const text = m.text + (m.includeContext ? this.editorContext() : '');
+        if (!this.agent.busy) { await this.agent.run(text, m.text); await this.saveChat(); break; }
+        this.post({ type: 'queued', id: this.agent.enqueue(text, m.text), text: m.text });
+        break;
+      }
+      case 'unqueue': this.agent.unqueue(m.id); break;
       case 'stop': this.agent.stop(); break;
       case 'compact': if (await this.agent.compactNow((m.focus || '').trim())) await this.saveChat(); break;
       case 'new': await this.newChat(); break;

@@ -4,6 +4,7 @@
   const log = $('log'), input = $('input'), send = $('send'), panel = $('panel'), modelSel = $('model');
   let busy = false, expiryWarned = false, budgetWarned = false, limitsTip = '', ctxText = '', creditText = '', cur = null, curText = '', curReasoning = null, renderPending = false;
   const toolEls = new Map();
+  const IDLE_PLACEHOLDER = input.placeholder;
   const isMac = navigator.platform.toUpperCase().includes('MAC');
 
   const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -56,6 +57,7 @@
     send.textContent = b ? 'Stop' : 'Send';
     send.classList.toggle('stop', b);
     document.body.classList.toggle('busy', b);
+    input.placeholder = b ? 'Add instructions while the agent works… (Enter to queue; sent after the current step)' : IDLE_PLACEHOLDER;
   }
   function argSummary(name, a) {
     if (!a || typeof a !== 'object') return String(a || '').slice(0, 80);
@@ -66,15 +68,22 @@
 
   // ---------- input ----------
   function submit() {
-    if (busy) { vscode.postMessage({ type: 'stop' }); return; }
     const text = input.value.trim();
     if (!text) return;
-    input.value = '';
     const cmd = text.match(/^\/compact(?:\s+([\s\S]*))?$/i);
+    if (busy) {
+      // While the agent works, a message is queued and delivered after the current step.
+      if (cmd) return;
+      input.value = '';
+      vscode.postMessage({ type: 'queue', text, includeContext: $('ctx').checked });
+      return;
+    }
+    input.value = '';
     if (cmd) { vscode.postMessage({ type: 'compact', focus: cmd[1] || '' }); return; }
     vscode.postMessage({ type: 'send', text, includeContext: $('ctx').checked });
   }
-  send.onclick = submit;
+  // The button is Stop while the agent works; Enter in the box queues a message instead.
+  send.onclick = () => (busy ? vscode.postMessage({ type: 'stop' }) : submit());
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); submit(); }
   });
@@ -282,7 +291,31 @@
         break;
       case 'status': setBusy(m.busy); break;
       case 'clear': log.innerHTML = ''; $('todos').hidden = true; $('usage').textContent = ''; toolEls.clear(); cur = null; curText = ''; curReasoning = null; break;
+      case 'queued': {
+        const d = add('user queued', `<div class="ut">${esc(m.text).replace(/\n/g, '<br>')}</div><div class="qnote">Queued. Sent after the current step. <button class="qx" title="Remove this message">Remove</button></div>`);
+        d.dataset.qid = m.id;
+        d.querySelector('.qx').onclick = () => { vscode.postMessage({ type: 'unqueue', id: m.id }); d.remove(); };
+        break;
+      }
+      case 'queuedLeft': {
+        for (const id of m.ids) { const q = log.querySelector(`.queued[data-qid="${CSS.escape(id)}"]`); if (q) q.remove(); }
+        input.value = [input.value.trim(), m.text].filter(Boolean).join('\n\n');
+        add('info', 'Your queued message was not sent. It is back in the input box.');
+        break;
+      }
+      case 'toolOutput': {
+        const d = toolEls.get(m.id);
+        if (!d) break;
+        let live = d.querySelector('.live');
+        if (!live) { live = document.createElement('pre'); live.className = 'live'; d.appendChild(live); }
+        const follow = nearBottom();
+        live.textContent = (live.textContent + m.text.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')).slice(-3000);
+        live.scrollTop = live.scrollHeight;
+        if (follow) log.scrollTop = log.scrollHeight;
+        break;
+      }
       case 'user': {
+        for (const id of m.queuedIds || []) { const q = log.querySelector(`.queued[data-qid="${CSS.escape(id)}"]`); if (q) q.remove(); }
         const d = add('user', `<div class="ut">${esc(m.text).replace(/\n/g, '<br>')}</div><button class="rewind" title="Rewind: restore files the agent changed since this message and edit it">↶ Rewind</button>`);
         d.querySelector('.rewind').onclick = () => vscode.postMessage({ type: 'revert', turn: m.turn });
         break;
@@ -322,6 +355,7 @@
         if (!d) break;
         d.classList.add(m.ok ? 'ok' : 'fail');
         const st = d.querySelector('.st'), out = d.querySelector('.out');
+        const liveOut = d.querySelector('.live'); if (liveOut) liveOut.remove();
         if (st) st.textContent = m.denied ? '⊘' : m.ok ? '✓' : '✗';
         if (m.denied) {
           d.classList.add('denied');

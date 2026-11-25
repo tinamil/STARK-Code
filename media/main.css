@@ -94,3 +94,7 @@ body:not(.busy) .msg.user:hover .rewind { display: block; }
 .tool.denied { border-left-color: var(--vscode-editorWarning-foreground, #cca700); }
 .tool .badge { font-size: 10px; font-weight: 600; padding: 0 6px; border-radius: 8px; color: var(--vscode-editorWarning-foreground, #cca700); border: 1px solid currentColor; }
 #pendingBar[hidden] { display: none; }
+.msg.user.queued { opacity: .75; border-left-style: dashed; }
+.msg.user.queued .qnote { font-size: 11px; opacity: .8; margin-top: 3px; }
+.msg.user.queued .qx { font-size: 11px; padding: 0 6px; margin-left: 4px; }
+.tool pre.live { max-height: 160px; opacity: .85; border-left: 2px solid var(--vscode-focusBorder); }
