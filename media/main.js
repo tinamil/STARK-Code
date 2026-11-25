@@ -163,6 +163,21 @@
 
   // ---------- side panel (setup / history) ----------
   function closePanel() { panel.hidden = true; panel.innerHTML = ''; delete panel.dataset.kind; }
+  // How much of the conversation is kept before older steps are summarized (compactAt -> compactTo).
+  const MEMORY_PRESETS = [
+    { id: 'small', at: 25000, to: 5000, label: 'Small: fewest tokens' },
+    { id: 'standard', at: 50000, to: 10000, label: 'Standard' },
+    { id: 'large', at: 150000, to: 30000, label: 'Large: remembers more, costs more' },
+  ];
+  const APPROVAL_MODES = [['ask', 'Ask before edits and commands'], ['autoEdit', 'Allow edits, ask before commands'], ['auto', 'Never ask (dangerous)']];
+  const kTokens = (n) => `${Math.round(n / 1000)}k`;
+  function memoryOptions(m) {
+    const cur = MEMORY_PRESETS.find((p) => p.at === m.compactAt && p.to === m.compactTo);
+    const opts = MEMORY_PRESETS.map((p) => `<option value="${p.id}"${p === cur ? ' selected' : ''}>${p.label} (summarize at ${kTokens(p.at)} tokens, down to ${kTokens(p.to)})</option>`);
+    // Values set by hand in Settings stay as they are unless a preset is picked.
+    if (!cur && m.compactAt) opts.push(`<option value="custom" selected>Custom (${kTokens(m.compactAt)} down to ${kTokens(m.compactTo)}, from Settings)</option>`);
+    return opts.join('');
+  }
   function showSetup(m) {
     panel.dataset.kind = 'setup'; panel.hidden = false;
     panel.innerHTML = `<div class="ptitle">${m.first ? 'Welcome. Connect a model to get started.' : 'Connection'}</div>
@@ -174,9 +189,15 @@
         <div id="sList" class="clist" role="listbox" hidden></div>
         <div id="sHint" class="hint"></div></div>
       <label>Context window (tokens)<input id="sCtx" type="number" value="${m.contextWindow || 1000000}"></label>
+      <label>Conversation memory<select id="sMem">${memoryOptions(m)}</select></label>
+      <label>Approvals<select id="sMode">${APPROVAL_MODES.map(([v, t]) => `<option value="${v}"${v === (m.approvalMode || 'ask') ? ' selected' : ''}>${t}</option>`).join('')}</select></label>
       <div class="btns"><button id="sTest">Test connection</button><button id="sSave" class="primary">Save</button><span class="sp"></span>${m.hasKey ? '<button id="sClear" title="Delete saved key">Clear key</button>' : ''}<button id="sMore">All settings</button></div>
       <pre id="sOut" hidden></pre>`;
-    const vals = () => ({ baseUrl: $('sBase').value.trim(), model: $('sModel').value.trim(), apiKey: $('sKey').value, contextWindow: $('sCtx').value });
+    const vals = () => {
+      const mem = MEMORY_PRESETS.find((p) => p.id === $('sMem').value);
+      return { baseUrl: $('sBase').value.trim(), model: $('sModel').value.trim(), apiKey: $('sKey').value, contextWindow: $('sCtx').value,
+        approvalMode: $('sMode').value, ...(mem ? { compactAt: mem.at, compactTo: mem.to } : {}) };
+    };
     combo.models = []; combo.state = 'loading'; combo.error = '';
     const loadModels = () => { combo.state = 'loading'; updateHint(); vscode.postMessage({ type: 'fetchModels', ...vals() }); };
     combo.load = loadModels;

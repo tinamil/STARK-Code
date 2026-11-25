@@ -9,6 +9,9 @@ const { runTests } = require('@vscode/test-electron');
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'stark-vscode-ws-'));
   fs.writeFileSync(path.join(workspace, 'a.txt'), 'one\ntwo\nthree\n');
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'stark-vscode-user-'));
+  // A setting saved by a version before 0.14.0, to check it is moved to the new prefix.
+  fs.mkdirSync(path.join(userData, 'User'), { recursive: true });
+  fs.writeFileSync(path.join(userData, 'User', 'settings.json'), JSON.stringify({ 'oaiAgent.commandTimeoutMs': 54321 }));
   try {
     await runTests({
       extensionDevelopmentPath: path.resolve(__dirname, '..', '..'),

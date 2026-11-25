@@ -102,7 +102,9 @@ ui('streaming text renders markdown safely; a bad message is reported and later 
 });
 
 ui('setup: model picker lists names under the field, filters, and is keyboard driven', async ({ page, send, sent }) => {
-  await send({ type: 'setup', baseUrl: 'https://x/v1', model: '', hasKey: true, contextWindow: 1000000 });
+  await send({ type: 'setup', baseUrl: 'https://x/v1', model: '', hasKey: true, contextWindow: 1000000, compactAt: 50000, compactTo: 10000, approvalMode: 'ask' });
+  assert.strictEqual(await page.inputValue('#sMem'), 'standard');
+  assert.strictEqual(await page.locator('#sMem option').count(), 3, 'no Custom entry when a preset matches');
   await send({ type: 'setupModels', models: [{ id: 'gemini-flash', tools: false }, { id: 'gemini-flash-withtools', tools: true }, { id: 'gemini-lite-withtools', tools: true }] });
   await page.click('#sModel');
   assert.deepStrictEqual(await page.$$eval('#sList .cname', (o) => o.map((x) => x.textContent)), ['gemini-flash-withtools', 'gemini-lite-withtools', 'gemini-flash']);
@@ -116,8 +118,17 @@ ui('setup: model picker lists names under the field, filters, and is keyboard dr
   await page.fill('#sModel', 'gemini-flash'); await page.evaluate(() => document.activeElement.blur());
   assert.match(await page.textContent('#sHint'), /does not support tool calling/);
   await sent();
+  await page.selectOption('#sMem', 'large'); await page.selectOption('#sMode', 'autoEdit');
   await page.click('#sSave');
-  assert.deepStrictEqual((await sent()).map((m) => [m.type, m.model]), [['saveSetup', 'gemini-flash']]);
+  assert.deepStrictEqual((await sent()).map((m) => [m.type, m.model, m.compactAt, m.compactTo, m.approvalMode]), [['saveSetup', 'gemini-flash', 150000, 30000, 'autoEdit']]);
+  // Sizes set by hand show as Custom and are left alone on save.
+  await send({ type: 'setup', baseUrl: 'https://x/v1', model: 'm', hasKey: true, contextWindow: 1000000, compactAt: 80000, compactTo: 20000, approvalMode: 'ask' });
+  assert.strictEqual(await page.inputValue('#sMem'), 'custom');
+  await sent();
+  await page.click('#sSave');
+  assert.deepStrictEqual((await sent()).map((m) => [m.type, 'compactAt' in m]), [['saveSetup', false]]);
+  await send({ type: 'setup', baseUrl: 'https://x/v1', model: '', hasKey: true, contextWindow: 1000000, compactAt: 50000, compactTo: 10000, approvalMode: 'ask' });
+  await sent();
   await send({ type: 'testResult', ok: false, lines: ['✗ Your API key is locked.'], unlockUrl: 'https://portal.example/unlock/1' });
   await send({ type: 'testResult', ok: false, lines: ['✗ Your API key is locked.'], unlockUrl: 'https://portal.example/unlock/1' });
   assert.strictEqual(await page.locator('#panel .unlock button').count(), 1);

@@ -43,7 +43,7 @@ body:not(.busy) .msg.user:hover .rewind { display: block; }
 .approval.danger { border-color: var(--vscode-errorForeground); }
 .approval .warn { color: var(--vscode-errorForeground); margin: 2px 0; }
 .approval .keys { opacity: .6; font-size: 11px; margin-top: 4px; }
-#panel { padding: 8px; border-bottom: 1px solid var(--vscode-panel-border); max-height: 60vh; overflow-y: auto; }
+#panel { padding: 8px; border-bottom: 1px solid var(--vscode-panel-border); max-height: 80vh; overflow-y: auto; }
 #panel .ptitle { font-weight: bold; margin-bottom: 6px; }
 #panel label { display: block; font-size: 12px; margin-bottom: 6px; }
 #panel input { width: 100%; box-sizing: border-box; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, transparent); padding: 4px; margin-top: 2px; }

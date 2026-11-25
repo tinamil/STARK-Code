@@ -21,8 +21,8 @@ async function until(fn, what, ms = 15000) {
 exports.run = async function run() {
   const root = vscode.workspace.workspaceFolders[0].uri.fsPath;
   const file = path.join(root, 'a.txt');
-  const cfg = vscode.workspace.getConfiguration('oaiAgent');
-  const setCfg = (k, v) => vscode.workspace.getConfiguration('oaiAgent').update(k, v, vscode.ConfigurationTarget.Global);
+  const cfg = vscode.workspace.getConfiguration('starkCode');
+  const setCfg = (k, v) => vscode.workspace.getConfiguration('starkCode').update(k, v, vscode.ConfigurationTarget.Global);
 
   const ext = vscode.extensions.getExtension('local.oai-agent');
   assert.ok(ext, 'the extension is installed in the test instance');
@@ -56,12 +56,20 @@ exports.run = async function run() {
     assert.match(provider.view.webview.html, /Content-Security-Policy/);
   });
 
+  test('settings saved under the old oaiAgent prefix are moved to starkCode', async () => {
+    assert.strictEqual(vscode.workspace.getConfiguration('starkCode').inspect('commandTimeoutMs').globalValue, 54321);
+    assert.strictEqual(vscode.workspace.getConfiguration('oaiAgent').inspect('commandTimeoutMs').globalValue, undefined, 'the old setting is removed');
+  });
+
   test('setup: settings are saved, the key goes to the secret store, the connection test runs', async () => {
-    await provider.onMessage({ type: 'saveSetup', baseUrl: srv.base, model: 'test-model', apiKey: 'secret-key-123', contextWindow: 1000000 });
-    await until(() => vscode.workspace.getConfiguration('oaiAgent').get('model') === 'test-model', 'the model setting');
-    assert.strictEqual(vscode.workspace.getConfiguration('oaiAgent').get('baseUrl'), srv.base);
+    await provider.onMessage({ type: 'saveSetup', baseUrl: srv.base, model: 'test-model', apiKey: 'secret-key-123', contextWindow: 1000000, approvalMode: 'autoEdit', compactAt: 150000, compactTo: 30000 });
+    await until(() => vscode.workspace.getConfiguration('starkCode').get('compactTo') === 30000, 'the memory preset');
+    assert.deepStrictEqual([vscode.workspace.getConfiguration('starkCode').get('compactAt'), vscode.workspace.getConfiguration('starkCode').get('approvalMode')], [150000, 'autoEdit']);
+    await setCfg('compactAt', undefined); await setCfg('compactTo', undefined); await setCfg('approvalMode', undefined);
+    await until(() => vscode.workspace.getConfiguration('starkCode').get('model') === 'test-model', 'the model setting');
+    assert.strictEqual(vscode.workspace.getConfiguration('starkCode').get('baseUrl'), srv.base);
     assert.strictEqual(await provider.getKey(), 'secret-key-123');
-    assert.strictEqual(vscode.workspace.getConfiguration('oaiAgent').inspect('contextWindow').globalValue, undefined, 'an unchanged context window is not stored');
+    assert.strictEqual(vscode.workspace.getConfiguration('starkCode').inspect('contextWindow').globalValue, undefined, 'an unchanged context window is not stored');
     script = [toolCall('get_weather', { city: 'Paris' }), { content: 'Sunny' }];
     await provider.onMessage({ type: 'testSetup', baseUrl: srv.base, model: 'test-model' });
     const r = lastOf('testResult');
@@ -95,7 +103,7 @@ exports.run = async function run() {
 
   test('approval from the keyboard commands, and a reloaded panel gets everything back', async () => {
     await setCfg('approvalMode', 'ask');
-    await until(() => vscode.workspace.getConfiguration('oaiAgent').get('approvalMode') === 'ask', 'the approval setting');
+    await until(() => vscode.workspace.getConfiguration('starkCode').get('approvalMode') === 'ask', 'the approval setting');
     script = [toolCall('write_file', { path: 'new.txt', content: 'hello\n', explanation: 'Add a file.' }), { content: 'Created.' }];
     const run = provider.onMessage({ type: 'send', text: 'create new.txt', includeContext: false });
     await until(() => provider.pending.size === 1, 'the approval prompt');
