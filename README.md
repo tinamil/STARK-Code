@@ -43,8 +43,9 @@ STARK locks API keys 14 days after they're created or unlocked. When that happen
 
 ## Approvals
 - An edit's approval card shows the change as a diff, plus the agent's one-line explanation of what it does and why. Commands show their explanation too. **Open in diff editor** (Ctrl/Cmd+Enter) opens VS Code's side-by-side view.
-- Enter allows, Esc denies, and Ctrl/Cmd+Enter opens the diff. These work while the panel has focus.
-- From the editor, use Ctrl/Cmd+Alt+Y to allow and Ctrl/Cmd+Alt+N to deny. The agent panel never takes focus from your editor.
+- Enter allows, Esc denies, and Ctrl/Cmd+Enter opens the diff. These work only while focus is on the prompt's card, so pressing a key while reading something else never answers a prompt.
+- If a prompt is waiting but scrolled out of view, a bar above the input says so; click it to jump to the prompt.
+- From anywhere in VS Code, use Ctrl/Cmd+Alt+Y to allow and Ctrl/Cmd+Alt+N to deny. The agent panel never takes focus from your editor.
 - Type feedback and press Enter to deny with a message. The agent continues using your feedback.
 
 ## Rewind and history

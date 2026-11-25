@@ -308,7 +308,7 @@ class Agent {
     let args;
     try { args = tc.function.arguments ? JSON.parse(tc.function.arguments) : {}; }
     catch { args = null; }
-    this.ui.post({ type: 'tool', id, name, args: args || tc.function.arguments });
+    this.ui.post({ type: 'tool', id, name, args: displayArgs(args || tc.function.arguments) });
     const done = (ok, output, extra = {}) => { this.ui.post({ type: 'toolResult', id, ok, output: String(output).slice(0, 8000) }); return { output, ...extra }; };
 
     if (!tool) return done(false, `Error: unknown tool "${name}".`);
@@ -503,4 +503,14 @@ class Agent {
   }
 }
 
-module.exports = { Agent };
+/** Tool arguments as shown in the panel: long strings (file contents) are shortened; diffs show the change. */
+function displayArgs(args, max = 2000) {
+  const cut = (s) => (s.length > max ? `${s.slice(0, max)}… [${(s.length - max).toLocaleString('en-US')} more characters not shown]` : s);
+  if (typeof args === 'string') return cut(args);
+  if (!args || typeof args !== 'object') return args;
+  const out = Array.isArray(args) ? [] : {};
+  for (const k of Object.keys(args)) out[k] = typeof args[k] === 'string' ? cut(args[k]) : args[k];
+  return out;
+}
+
+module.exports = { Agent, displayArgs };

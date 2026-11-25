@@ -240,3 +240,16 @@ test('locked STARK key: the error carries the unlock link (https only)', async (
   assert.strictEqual(posts.find((p) => p.type === 'error').unlockUrl, undefined);
   assert.match(posts.find((p) => p.type === 'error').text, /API Keys page/);
 });
+
+test('panel shows shortened tool arguments; the model and the file get the full content', async (t) => {
+  const content = 'x'.repeat(50000);
+  const srv = await scriptedModel([toolCall('write_file', { path: 'big.txt', content })]);
+  t.after(srv.close);
+  const root = tempWorkspace();
+  const { agent, posts } = makeAgent({ base: srv.base, root });
+  await agent.run('write');
+  const shown = posts.find((p) => p.type === 'tool').args.content;
+  assert.ok(shown.length < 2100 && /48,000 more characters/.test(shown));
+  assert.strictEqual(fs.readFileSync(path.join(root, 'big.txt'), 'utf8').length, 50000);
+  assert.strictEqual(JSON.parse(agent.messages.find((m) => m.tool_calls).tool_calls[0].function.arguments).content.length, 50000);
+});

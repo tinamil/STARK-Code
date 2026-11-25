@@ -69,6 +69,9 @@ function diffLines(oldText, newText, { context = 3, maxLines = 400 } = {}) {
     cur.lines.push(ops[k]);
     shown++;
   }
+  // Very long lines (minified files) are shortened for display.
+  const MAX_LINE = 500;
+  for (const h of hunks) h.lines = h.lines.map(([op, t]) => (t.length > MAX_LINE ? [op, `${t.slice(0, MAX_LINE)}… [${t.length - MAX_LINE} more characters]`] : [op, t]));
   return { adds, dels, hunks, truncated };
 }
 
