@@ -11,7 +11,7 @@ const PROPOSED_SCHEME = 'oai-agent-proposed';
 
 function getConfig() {
   const c = vscode.workspace.getConfiguration('oaiAgent');
-  const keys = ['apiMode', 'baseUrl', 'model', 'models', 'contextWindow', 'maxTokens', 'temperature', 'maxSteps', 'approvalMode',
+  const keys = ['apiMode', 'baseUrl', 'model', 'models', 'contextWindow', 'compactAt', 'compactTo', 'maxTokens', 'temperature', 'maxSteps', 'approvalMode',
     'autoApproveCommands', 'autoApproveReadOnlyCommands', 'autoApproveReadOnlyScripts', 'shell', 'commandTimeoutMs', 'maxToolOutputChars', 'extraHeaders', 'extraBody', 'customInstructions'];
   const o = {};
   for (const k of keys) o[k] = c.get(k);

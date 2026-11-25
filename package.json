@@ -3,7 +3,7 @@
   "displayName": "STARK Code",
   "description": "Coding agent for VS Code that works with the STARK API gateway and other OpenAI-compatible endpoints.",
   "publisher": "local",
-  "version": "0.7.2",
+  "version": "0.8.0",
   "license": "MIT",
   "engines": {
     "vscode": "^1.85.0"
@@ -92,7 +92,17 @@
         "oaiAgent.contextWindow": {
           "type": "number",
           "default": 1000000,
-          "description": "Context window in tokens. Older conversation is summarized at ~70% of this. Every step resends the conversation, so a larger window uses more of the gateway's daily budget per step. If the gateway reports a tokens-per-minute limit below this, the agent stays under that limit (a larger request could never be sent); if a model's real limit is smaller, it adapts to that."
+          "description": "Upper bound for the conversation in tokens (the model's limit). Day to day, compactAt/compactTo keep the conversation much smaller than this. If the gateway reports a tokens-per-minute limit below it, the agent stays under that limit; if a model's real limit is smaller, it adapts."
+        },
+        "oaiAgent.compactAt": {
+          "type": "number",
+          "default": 50000,
+          "description": "Summarize the oldest steps when the conversation passes this many tokens. Lower = fewer tokens per step but the agent re-reads files more often. Never exceeds 70% of the context window."
+        },
+        "oaiAgent.compactTo": {
+          "type": "number",
+          "default": 10000,
+          "description": "After summarizing, keep about this many tokens (system prompt, summary and the most recent steps)."
         },
         "oaiAgent.maxTokens": {
           "type": "number",

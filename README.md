@@ -16,13 +16,15 @@ Switch models from the dropdown at the top. It lists models the server reports p
 ## Tools
 read_file, write_file, edit_file, list_dir, glob, grep (uses VS Code's bundled ripgrep), run_command, web_fetch, todo_write.
 
-## Context window
-`oaiAgent.contextWindow` defaults to 1,000,000 tokens. When the conversation reaches about 70% of it, older messages are summarized. Every step resends the conversation, so the window size sets how many tokens a step can use against the daily budget: with a 5M daily budget, a 1M window allows only about 7 steps at the largest size, and a 200k window about 35. Set it under **Setup** to match your budget.
+## Context size
+The agent keeps the conversation small as it works. When it passes `oaiAgent.compactAt` (default 50,000 tokens), the oldest steps are summarized and the conversation drops to about `oaiAgent.compactTo` (default 10,000): the system prompt, a summary, and the most recent steps. Each step resends the conversation, so this keeps every step cheap against the daily budget. The trade-off is that the agent re-reads files whose contents were summarized away. Raise both settings for more memory, or lower them for fewer tokens.
+
+`oaiAgent.contextWindow` (default 1,000,000) is the upper bound, the model's own limit. `compactAt` never exceeds 70% of it.
 
 The window is also capped at about 90% of the gateway's tokens-per-minute limit (from its `X-RateLimit-*-Tokens-Minute` headers), because a larger request could never be sent. When the next request wouldn't fit in what's left of the current minute, or no requests are left, the agent waits for the reset instead of getting a 429. The footer shows the daily credits; hover over it for the per-minute tokens and requests left. You get a warning when less than 10% of the day's credits remain. If a model's real limit is smaller, the agent notices the server's error, uses a smaller limit for that chat, summarizes and retries.
 
 ## Compacting
-Type `/compact` (or click **Compact**) to summarize the conversation now and free up context, for example before starting a new task in the same chat. Add a note on what to keep: `/compact keep the API design decisions`. The summary is shown and can be expanded. Files, and Rewind for earlier edits, are unaffected. The agent also compacts automatically at about 70% of the context window.
+Type `/compact` (or click **Compact**) to summarize the conversation now and free up context, for example before starting a new task in the same chat. Add a note on what to keep: `/compact keep the API design decisions`. The summary is shown and can be expanded. Files, and Rewind for earlier edits, are unaffected. The agent also summarizes older steps automatically as it goes (see Context size).
 
 ## API mode
 `oaiAgent.apiMode` can be `chat` (`/chat/completions`) or `responses` (`/responses`, stateless with `store:false`). Some gateways pass tool definitions through only one of these. **Test connection** checks the selected mode and falls back to the other if tool calling fails.
