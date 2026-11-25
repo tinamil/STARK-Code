@@ -5,6 +5,7 @@ const { Agent, displayArgs } = require('./agent');
 const { listModels, testConnection } = require('./llm');
 const { createEditorIo } = require('./editorio');
 const { ChatStore } = require('./chatstore');
+const { panelBody } = require('./panelhtml');
 
 const SECRET_KEY = 'oaiAgent.apiKey';
 const PROPOSED_SCHEME = 'oai-agent-proposed';
@@ -103,16 +104,7 @@ class ChatViewProvider {
     view.webview.html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${view.webview.cspSource}; script-src 'nonce-${nonce}';">
 <link rel="stylesheet" href="${css}"></head><body>
-<div id="top"><select id="model" title="Model"></select><span class="sp"></span>
-<button id="btnNew" title="New chat">New</button><button id="btnHistory" title="Past chats">History</button><button id="btnSetup" title="Connection setup">Setup</button></div>
-<div id="panel" hidden></div>
-<div id="log"></div>
-<button id="pendingBar" hidden>Waiting for your approval. Show the prompt ↓</button>
-<div id="todos" hidden></div>
-<div id="bottom">
-<textarea id="input" rows="3" placeholder="Ask the agent… (Enter to send, Shift+Enter for newline, /compact to summarize)"></textarea>
-<div id="row"><label><input type="checkbox" id="ctx" checked> Include file/selection</label><span class="sp"></span><span id="usage"></span><button id="btnCompact" title="Summarize the conversation to free up context. Tip: type /compact followed by what to keep.">Compact</button><button id="send">Send</button></div>
-</div>
+${panelBody()}
 <script nonce="${nonce}" src="${js}"></script></body></html>`;
 
     view.webview.onDidReceiveMessage((m) => this.onMessage(m).catch((e) => this.post({ type: 'error', text: String(e.message || e) })));

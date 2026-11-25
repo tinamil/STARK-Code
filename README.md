@@ -82,5 +82,5 @@ These files at the workspace root are added to the system prompt: `AGENTS.md`, `
 - Release: bump `version` in package.json in a PR. When it merges to `main`, the Release workflow runs the tests, builds `stark-code-<version>.vsix`, and publishes a GitHub release with the `v<version>` tag. Versions that already have a release are skipped. Pushing a `v<version>` tag by hand also works.
 
 ## Development
-- Run the tests with `npm test` (Node 22+, no dependencies). The PowerShell script-checker tests run when PowerShell is installed. Set `REQUIRE_POWERSHELL=1` to make a missing PowerShell an error, and `OAI_AGENT_PWSH` to choose a specific PowerShell.
-- CI runs the tests on Linux and Windows, including Windows PowerShell 5.1, for every PR. The release workflow runs them before packaging.
+- Run the tests with `npm test` (Node 22+). The extension itself has no dependencies. The panel tests (`test/ui`) run the real panel in headless Chromium and need the one dev dependency: `npm ci && npx playwright install chromium`. Without it they are skipped; `REQUIRE_UI=1` makes that an error. The PowerShell script-checker tests run when PowerShell is installed. Set `REQUIRE_POWERSHELL=1` to make a missing PowerShell an error, and `OAI_AGENT_PWSH` to choose a specific PowerShell.
+- CI runs the tests on Linux and Windows, including Windows PowerShell 5.1 and the panel tests (Linux), for every PR. The release workflow runs them before packaging.

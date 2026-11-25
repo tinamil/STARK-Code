@@ -3,3 +3,5 @@
 docs/**
 **/*.vsix
 test/**
+node_modules/**
+package-lock.json

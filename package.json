@@ -212,5 +212,8 @@
   },
   "scripts": {
     "test": "node --test \"test/**/*.test.js\""
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
   }
 }
