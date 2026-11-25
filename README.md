@@ -88,4 +88,5 @@ These files at the workspace root are added to the system prompt: `AGENTS.md`, `
 
 ## Development
 - Run the tests with `npm test` (Node 22+). The extension itself has no dependencies. The panel tests (`test/ui`) run the real panel in headless Chromium and need the one dev dependency: `npm ci && npx playwright install chromium`. Without it they are skipped; `REQUIRE_UI=1` makes that an error. The PowerShell script-checker tests run when PowerShell is installed. Set `REQUIRE_POWERSHELL=1` to make a missing PowerShell an error, and `OAI_AGENT_PWSH` to choose a specific PowerShell.
-- CI runs the tests on Linux and Windows, including Windows PowerShell 5.1 and the panel tests (Linux), for every PR. The release workflow runs them before packaging.
+- `npm run test:vscode` launches a real VS Code with the extension and tests what needs the VS Code API: activation, settings, the secret store, edits through the editor (including Ctrl+Z), approvals from the keyboard commands, panel reload and saved chats. It downloads VS Code on first run, so it needs internet access.
+- CI runs the tests on Linux and Windows, including Windows PowerShell 5.1, the panel tests and the VS Code tests (Linux), for every PR. The release workflow runs them before packaging.
