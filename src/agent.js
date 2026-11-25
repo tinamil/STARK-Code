@@ -447,7 +447,16 @@ class Agent {
     const head = this.messages.slice(1, cut);
     if (head.length < 2) { this.shrinkToolOutputs(); return; }
 
-    const summary = await this.summarize(cfg, head, window);
+    // The summary request itself can be too large (a big chat reopened from History, before the
+    // gateway's limits are known): shrink what is sent and try again.
+    let summary, sumWindow = window;
+    for (let attempt = 0; ; attempt++) {
+      try { summary = await this.summarize(cfg, head, sumWindow); break; }
+      catch (e) {
+        if (attempt >= 2 || this.abort.signal.aborted || !(e.tooLarge || isContextOverflow(e))) throw e;
+        sumWindow = Math.floor(Math.min(sumWindow, this.effectiveWindow(cfg)) / 2);
+      }
+    }
     this.messages = [
       this.messages[0],
       { role: 'user', content: `[Summary of earlier conversation in this session]\n${summary}` },
