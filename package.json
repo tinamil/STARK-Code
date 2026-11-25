@@ -3,7 +3,7 @@
   "displayName": "STARK Code",
   "description": "Coding agent for VS Code that works with the STARK API gateway and other OpenAI-compatible endpoints.",
   "publisher": "local",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "license": "MIT",
   "engines": {
     "vscode": "^1.85.0"

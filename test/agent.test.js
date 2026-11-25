@@ -296,11 +296,10 @@ test('rolling compaction keeps the conversation between the low and high marks',
   await agent.run('read the files then fix f0');
   assert.deepStrictEqual(posts.filter((p) => p.type === 'error'), []);
   assert.strictEqual(agent.messages.at(-1).content, 'All done.');
-  assert.ok(summaries >= 2, `compacted repeatedly (${summaries})`);
   assert.ok(Math.max(...sizes) < 6000 + 1500, `requests stay near the high mark (max ${Math.max(...sizes)})`);
-  assert.match(lastSummaryInput, /SUMMARY #\d/, 'later summaries build on the earlier summary');
+  assert.ok(posts.some((p) => p.type === 'info' && /Trimmed old tool output/.test(p.text)), 'old output is trimmed without a model call');
+  assert.ok(summaries <= 2, `trimming avoids most summary calls (${summaries})`);
   assert.match(fs.readFileSync(path.join(root, 'f11.txt'), 'utf8'), /^changed 11/, 'a file still in the conversation can be edited without re-reading');
-  assert.ok(posts.some((p) => p.type === 'info' && /Summarized earlier steps/.test(p.text)));
 });
 
 test('compaction marks: defaults, window cap, and low mark below high', () => {
@@ -308,4 +307,89 @@ test('compaction marks: defaults, window cap, and low mark below high', () => {
   assert.deepStrictEqual(agent.compactionMarks(cfg), { window: 1000000, high: 50000, low: 10000 });
   assert.deepStrictEqual(agent.compactionMarks({ ...cfg, contextWindow: 32000 }), { window: 32000, high: 22400, low: 10000 });
   assert.deepStrictEqual(agent.compactionMarks({ ...cfg, compactAt: 200000, compactTo: 150000 }), { window: 1000000, high: 200000, low: 100000 });
+});
+
+test('trimming: repeated reads, reads of since-changed files, and old large output', async () => {
+  const root = tempWorkspace();
+  const { agent } = makeAgent({ base: 'http://127.0.0.1:1/v1', root });
+  const call = (id, name, args) => ({ role: 'assistant', tool_calls: [{ id, type: 'function', function: { name, arguments: JSON.stringify(args) } }] });
+  const result = (id, content) => ({ role: 'tool', tool_call_id: id, content });
+  const big = 'x'.repeat(5000);
+  agent.messages = [{ role: 'system', content: 's' }, { role: 'user', content: 'go', _turn: 1 },
+    call('1', 'read_file', { path: 'a.js' }), result('1', big),            // read again later -> removed
+    call('2', 'read_file', { path: 'b.js' }), result('2', big),            // changed later, old -> removed
+    call('3', 'run_command', { command: 'npm test' }), result('3', big),   // old large output -> trimmed
+    call('4', 'edit_file', { path: 'b.js', old_string: 'x', new_string: 'y' }), result('4', 'Edited b.js (1 replacement).'),
+    call('5', 'read_file', { path: 'a.js' }), result('5', big),            // latest read of a.js -> kept
+    call('6', 'read_file', { path: 'c.js' }), result('6', big),            // recent -> kept
+    call('7', 'edit_file', { path: 'c.js', old_string: 'x', new_string: 'y' }), result('7', 'Edited c.js (1 replacement).'),
+  ];
+  const freed = agent.pruneStale(10);   // steps from index 10 on are "recent"
+  const c = (id) => agent.messages.find((m) => m.tool_call_id === id).content;
+  assert.match(c('1'), /read again later/);
+  assert.match(c('2'), /changed after this read/);
+  assert.ok(c('3').length < 800 && /Older output trimmed: 4,400 more characters/.test(c('3')));
+  assert.strictEqual(c('5'), big);
+  assert.strictEqual(c('6'), big, 'a recent read stays even though the file was edited after it');
+  assert.ok(freed > 14000);
+  agent.rebuildReadFiles();
+  const has = (f) => agent.readFiles.has(path.join(root, f));
+  assert.deepStrictEqual([has('a.js'), has('b.js'), has('c.js')], [true, false, true], 'b.js must be read again before editing');
+  assert.ok(!JSON.stringify(agent.toJSON().messages.map((m) => m.role)).includes('_pruned'));
+});
+
+test('summaries keep the user\'s requests, changed files and task list word for word', async (t) => {
+  const summaryInputs = [];
+  const srv = await mockServer(async (req, body, res) => {
+    if (!body.tools) { summaryInputs.push(body.messages[1].content); return sseChat(res, [{ content: `model summary ${summaryInputs.length}` }]); }
+    const last = body.messages.at(-1);
+    if (last.role === 'user' && /FIRST/.test(last.content)) return sseChat(res, [toolCall('todo_write', { todos: [{ content: 'Add validation', status: 'in_progress' }, { content: 'Write tests', status: 'pending' }] })], { finish: 'tool_calls' });
+    if (last.role === 'user' && /SECOND/.test(last.content)) return sseChat(res, [toolCall('write_file', { path: 'src/new.js', content: 'x' })], { finish: 'tool_calls' });
+    sseChat(res, [{ content: 'ok ' + 'padding '.repeat(150) }]);
+  });
+  t.after(srv.close);
+  const root = tempWorkspace();
+  const { agent } = makeAgent({ base: srv.base, root, config: { compactAt: 2000, compactTo: 1000 } });
+  await agent.run('FIRST request: use tabs, never spaces <context>x</context>', 'FIRST request: use tabs, never spaces');
+  await agent.run('SECOND request: name the file new.js', 'SECOND request: name the file new.js');
+  for (let i = 0; i < 6; i++) await agent.run(`filler ${i}`, `filler ${i}`);
+  const summary = agent.messages[1].content;
+  assert.ok(summaryInputs.length >= 2, `summarized ${summaryInputs.length} times`);
+  assert.match(summary, /1\. FIRST request: use tabs, never spaces\n2\. SECOND request: name the file new\.js/);
+  assert.match(summary, /## Files you have changed in this session\n- src\/new\.js/);
+  assert.match(summary, /## Task list\n- \[~\] Add validation\n- \[ \] Write tests/);
+  assert.match(summary, /## Earlier work\nmodel summary \d/);
+  assert.match(summaryInputs.at(-1), /\[earlier summary\]\nmodel summary/, 'later summaries build on the earlier one');
+  assert.ok(!/FIRST request/.test(summaryInputs.at(-1)), 'pinned facts are not sent back through the summarizer');
+  // Survives save and reload, keeps the chat title, and Rewind drops requests after the rewind point.
+  const saved = JSON.parse(JSON.stringify(agent.toJSON()));
+  assert.strictEqual(saved.title, 'FIRST request: use tabs, never spaces');
+  const { agent: b } = makeAgent({ base: srv.base, root });
+  b.load(saved);
+  assert.strictEqual(b.pinned.requests[0].text, 'FIRST request: use tabs, never spaces');
+  await b.revertTo(2);
+  assert.deepStrictEqual(b.pinned.requests.map((r) => r.turn), [1]);
+});
+
+test('/compact keeps the pinned facts too', async (t) => {
+  const srv = await scriptedModel([{ content: 'hello' }]);
+  t.after(srv.close);
+  const { agent, posts } = makeAgent({ base: srv.base, root: tempWorkspace() });
+  await agent.run('Please keep functions under 20 lines');
+  await agent.compactNow('');
+  assert.match(agent.messages[1].content, /1\. Please keep functions under 20 lines/);
+  assert.match(posts.find((p) => p.type === 'compacted').summary, /exact words/);
+});
+
+test('token estimates are calibrated from the gateway\'s real counts', async (t) => {
+  const srv = await mockServer(async (req, body, res, raw) => sseChat(res, [{ content: 'ok' }], { usage: { prompt_tokens: Math.round(JSON.stringify(body.messages).length / 2 + JSON.stringify(body.tools).length / 2), completion_tokens: 1 } }));
+  t.after(srv.close);
+  const { agent } = makeAgent({ base: srv.base, root: tempWorkspace() });
+  assert.strictEqual(agent.charsPerToken, 3.5);
+  await agent.run('hello');
+  assert.ok(Math.abs(agent.charsPerToken - 2) < 0.05, `learned about 2 chars per token (got ${agent.charsPerToken})`);
+  const msgs = [{ role: 'user', content: 'x'.repeat(1000) }];
+  assert.ok(Math.abs(agent.est(msgs) - JSON.stringify(msgs).length / 2) < 30);
+  agent.calibrate(1000, 10);   // too small a sample: ignored
+  assert.ok(Math.abs(agent.charsPerToken - 2) < 0.05);
 });
