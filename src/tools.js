@@ -3,6 +3,7 @@ const fsp = require('fs/promises');
 const path = require('path');
 const { spawn, execFileSync } = require('child_process');
 const textfile = require('./textfile');
+const { resolveShell, powerShellArgs } = require('./shell');
 
 const SKIP_DIRS = new Set(['node_modules', '.git', '.hg', '.svn', 'dist', 'build', 'out', '.next', '__pycache__', '.venv', 'venv', 'target', '.idea']);
 
@@ -283,11 +284,14 @@ const TOOLS = [
       const timeout = a.timeout_ms || ctx.cfg.commandTimeoutMs || 120000;
       ctx.log && ctx.log(`\n$ ${a.command}   (cwd: ${cwd})\n`);
       return await new Promise((resolve) => {
-        const child = spawn(a.command, {
-          cwd, shell: ctx.cfg.shell || true, detached: process.platform !== 'win32',
-          stdio: ['ignore', 'pipe', 'pipe'],
+        const opts = {
+          cwd, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
           env: { ...process.env, PAGER: 'cat', GIT_PAGER: 'cat', GIT_TERMINAL_PROMPT: '0', CI: process.env.CI || '1', FORCE_COLOR: '0', NO_COLOR: '1' },
-        });
+        };
+        const sh = resolveShell(ctx.cfg);
+        const child = sh.kind === 'powershell'
+          ? spawn(sh.exe, powerShellArgs(a.command), opts)
+          : spawn(a.command, { ...opts, shell: sh.exe || true });
         let out = '', timedOut = false, done = false;
         const onData = (d) => { const s = d.toString(); out += s; ctx.log && ctx.log(s); if (out.length > 5e6) out = out.slice(-2e6); };
         child.stdout.on('data', onData); child.stderr.on('data', onData);

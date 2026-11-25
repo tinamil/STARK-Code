@@ -3,7 +3,7 @@
   "displayName": "STARK Code",
   "description": "Coding agent for VS Code that works with the STARK API gateway and other OpenAI-compatible endpoints.",
   "publisher": "local",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "license": "MIT",
   "engines": {
     "vscode": "^1.85.0"
@@ -163,7 +163,7 @@
         "oaiAgent.shell": {
           "type": "string",
           "default": "",
-          "description": "Shell for run_command (empty = system default)."
+          "description": "Shell for run_command. Empty (default): PowerShell on Windows (PowerShell 7 if installed, otherwise the built-in Windows PowerShell), and the system shell on macOS and Linux. Set to cmd.exe, pwsh, or a shell path to override."
         },
         "oaiAgent.commandTimeoutMs": {
           "type": "number",

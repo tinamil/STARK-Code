@@ -40,6 +40,9 @@ STARK locks API keys 14 days after they're created or unlocked. When that happen
 - `X-Stark-Key-Expiring-Soon` triggers a warning that your key is near expiry.
 - If `/models` reports `capabilities.tools: false`, the model picker marks that model "(no tools)".
 
+## Commands
+On Windows, commands run in PowerShell: PowerShell 7 if it is installed, otherwise the built-in Windows PowerShell 5.1. On macOS and Linux they run in the system shell. The agent is told which shell it has. Set `oaiAgent.shell` to `cmd.exe`, `pwsh`, or a shell path to override.
+
 ## How edits are made
 - **Files open in VS Code:** the agent reads the editor's current text, including unsaved changes. It applies its edit as a normal editor change, so **Ctrl+Z** undoes it, and then saves. If the file had unsaved changes, they're saved too, and the agent is told so.
 - **Other files:** written directly to disk.
