@@ -11,20 +11,23 @@ Or use the Extensions view: `...` menu → **Install from VSIX...**
 ## Setup
 Open the robot icon in the left sidebar. On first run the **Setup** panel opens: enter the base URL, key and model, then click **Test connection**. The test checks that the server is reachable, that chat works and that tool calling works. The key is stored in VS Code SecretStorage.
 
-Switch models from the dropdown at the top. It lists models the server reports plus `oaiAgent.models`.
+Switch models from the dropdown at the top. It lists models the server reports plus `starkCode.models`.
 
 ## Finding the panel
 If you lose the panel (for example after closing the side bar it was docked in), click **STARK Code** in the status bar, press Ctrl+Alt+S, or run **STARK Code: Open Chat** from the Command Palette.
+
+## Settings
+Setup covers the connection, conversation memory and approvals. **All settings** opens the rest (context window, shell, timeouts and so on) in VS Code Settings under `starkCode.*`. Settings saved as `oaiAgent.*` by versions before 0.14.0 are moved to the new names automatically.
 
 ## Tools
 read_file, write_file, edit_file, list_dir, glob, grep (uses VS Code's bundled ripgrep), run_command, web_fetch, todo_write.
 
 ## Context size
-The agent keeps the conversation small as it works. When it passes `oaiAgent.compactAt` (default 50,000 tokens), the oldest steps are summarized and the conversation drops to about `oaiAgent.compactTo` (default 10,000): the system prompt, a summary, and the most recent steps. Each step resends the conversation, so this keeps every step cheap against the daily budget. The trade-off is that the agent re-reads files whose contents were summarized away. Raise both settings for more memory, or lower them for fewer tokens.
+The agent keeps the conversation small as it works. When it passes `starkCode.compactAt` (default 50,000 tokens), the oldest steps are summarized and the conversation drops to about `starkCode.compactTo` (default 10,000): the system prompt, a summary, and the most recent steps. Each step resends the conversation, so this keeps every step cheap against the daily budget. The trade-off is that the agent re-reads files whose contents were summarized away. Raise both settings for more memory, or lower them for fewer tokens. **Conversation memory** in the Setup panel sets both at once: Small (25k down to 5k), Standard (50k down to 10k) or Large (150k down to 30k).
 
 Before summarizing, the agent first frees space without a model call: it removes file contents that were read again later or changed since, and trims large output from older steps. Often that is enough. When it does summarize, your requests (word for word), the list of files it changed and the current task list are kept exactly by the extension; the model only summarizes the rest. Sizes are measured with the gateway's real token counts once the first reply arrives.
 
-`oaiAgent.contextWindow` (default 1,000,000) is the upper bound, the model's own limit. `compactAt` never exceeds 70% of it.
+`starkCode.contextWindow` (default 1,000,000) is the upper bound, the model's own limit. `compactAt` never exceeds 70% of it.
 
 The window is also capped at about 90% of the gateway's tokens-per-minute limit (from its `X-RateLimit-*-Tokens-Minute` headers), because a larger request could never be sent. When the next request wouldn't fit in what's left of the current minute, or no requests are left, the agent waits for the reset instead of getting a 429. The footer shows the daily credits; hover over it for the per-minute tokens and requests left. You get a warning when less than 10% of the day's credits remain. If a model's real limit is smaller, the agent notices the server's error, uses a smaller limit for that chat, summarizes and retries.
 
@@ -46,7 +49,7 @@ STARK locks API keys 14 days after they're created or unlocked. When that happen
 - **Command output:** a running command shows its latest output under its row as it arrives. The full output replaces it when the command finishes.
 
 ## Commands
-On Windows, commands run in PowerShell: PowerShell 7 if it is installed, otherwise the built-in Windows PowerShell 5.1. On macOS and Linux they run in the system shell. The agent is told which shell it has. Set `oaiAgent.shell` to `cmd.exe`, `pwsh`, or a shell path to override.
+On Windows, commands run in PowerShell: PowerShell 7 if it is installed, otherwise the built-in Windows PowerShell 5.1. On macOS and Linux they run in the system shell. The agent is told which shell it has. Set `starkCode.shell` to `cmd.exe`, `pwsh`, or a shell path to override.
 
 ## How edits are made
 - **Files open in VS Code:** the agent reads the editor's current text, including unsaved changes. It applies its edit as a normal editor change, so **Ctrl+Z** undoes it, and then saves. If the file had unsaved changes, they're saved too, and the agent is told so.
@@ -71,8 +74,8 @@ On Windows, commands run in PowerShell: PowerShell 7 if it is installed, otherwi
   - `autoEdit`: file edits run without asking.
   - `auto`: nothing asks.
 - Edit approvals include a **View diff** button.
-- Read-only commands run without asking, as long as every path they touch is inside the workspace. Examples: `Get-Content`, `Get-ChildItem`, `Select-String`, `type`, `dir`, `findstr`, `cat`, `grep`, `git status/diff/log/show`, `node --check`, `tsc --noEmit`, `--version` checks. They also run without asking when wrapped in `powershell -NoProfile -Command "..."`. Anything with pipes, variables, chaining, redirects or script blocks still asks. Turn this off with `oaiAgent.autoApproveReadOnlyCommands`.
-- Read-only PowerShell scripts (pipelines, variables, `ForEach-Object`, `[regex]::Matches`, …) also run without asking. PowerShell's own parser analyzes the script without running it. It runs only if every command, .NET call, method, type and path is on a read-only list and inside the workspace, and the script is passed as one cleanly quoted argument (`powershell -NoProfile -Command "…"` with no inner double quotes). Anything else asks. Turn this off with `oaiAgent.autoApproveReadOnlyScripts`.
+- Read-only commands run without asking, as long as every path they touch is inside the workspace. Examples: `Get-Content`, `Get-ChildItem`, `Select-String`, `type`, `dir`, `findstr`, `cat`, `grep`, `git status/diff/log/show`, `node --check`, `tsc --noEmit`, `--version` checks. They also run without asking when wrapped in `powershell -NoProfile -Command "..."`. Anything with pipes, variables, chaining, redirects or script blocks still asks. Turn this off with `starkCode.autoApproveReadOnlyCommands`.
+- Read-only PowerShell scripts (pipelines, variables, `ForEach-Object`, `[regex]::Matches`, …) also run without asking. PowerShell's own parser analyzes the script without running it. It runs only if every command, .NET call, method, type and path is on a read-only list and inside the workspace, and the script is passed as one cleanly quoted argument (`powershell -NoProfile -Command "…"` with no inner double quotes). Anything else asks. Turn this off with `starkCode.autoApproveReadOnlyScripts`.
 - These always ask, even in `auto` mode, and never offer "Always allow":
   - destructive commands (`rm -rf`, `git push --force`, `git reset --hard`, `DROP TABLE`, `sudo`, `terraform destroy` and similar)
   - edits to files outside the workspace

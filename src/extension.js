@@ -10,13 +10,35 @@ const { panelBody } = require('./panelhtml');
 const SECRET_KEY = 'oaiAgent.apiKey';
 const PROPOSED_SCHEME = 'oai-agent-proposed';
 
-function getConfig() {
-  const c = vscode.workspace.getConfiguration('oaiAgent');
-  const keys = ['baseUrl', 'model', 'models', 'contextWindow', 'compactAt', 'compactTo', 'maxTokens', 'temperature', 'maxSteps', 'approvalMode',
+// Settings live under "starkCode". They were "oaiAgent" before 0.14.0.
+const CONFIG = 'starkCode';
+const OLD_CONFIG = 'oaiAgent';
+const CONFIG_KEYS = ['baseUrl', 'model', 'models', 'contextWindow', 'compactAt', 'compactTo', 'maxTokens', 'temperature', 'maxSteps', 'approvalMode',
     'autoApproveCommands', 'autoApproveReadOnlyCommands', 'autoApproveReadOnlyScripts', 'shell', 'commandTimeoutMs', 'maxToolOutputChars', 'extraHeaders', 'extraBody', 'customInstructions'];
+
+function getConfig() {
+  const c = vscode.workspace.getConfiguration(CONFIG);
   const o = {};
-  for (const k of keys) o[k] = c.get(k);
+  for (const k of CONFIG_KEYS) o[k] = c.get(k);
   return o;
+}
+
+/** Moves settings saved under the old "oaiAgent" prefix to "starkCode", at the scope they were set. */
+async function migrateSettings() {
+  const T = vscode.ConfigurationTarget;
+  const scopes = [['globalValue', T.Global], ['workspaceValue', T.Workspace], ['workspaceFolderValue', T.WorkspaceFolder]];
+  for (const k of CONFIG_KEYS) {
+    const old = vscode.workspace.getConfiguration(OLD_CONFIG).inspect(k);
+    if (!old) continue;
+    for (const [field, target] of scopes) {
+      if (old[field] === undefined) continue;
+      try {
+        const cur = vscode.workspace.getConfiguration(CONFIG);
+        if (cur.inspect(k)[field] === undefined) await cur.update(k, old[field], target);
+        await vscode.workspace.getConfiguration(OLD_CONFIG).update(k, undefined, target);
+      } catch { /* read-only or unavailable settings file: leave it */ }
+    }
+  }
 }
 function getRoot() {
   const f = vscode.workspace.workspaceFolders;
@@ -147,7 +169,7 @@ ${panelBody()}
       case 'stop': this.agent.stop(); break;
       case 'compact': if (await this.agent.compactNow((m.focus || '').trim())) await this.saveChat(); break;
       case 'new': await this.newChat(); break;
-      case 'setModel': await vscode.workspace.getConfiguration('oaiAgent').update('model', m.model, vscode.ConfigurationTarget.Global); break;
+      case 'setModel': await vscode.workspace.getConfiguration(CONFIG).update('model', m.model, vscode.ConfigurationTarget.Global); break;
       case 'approve': this.resolveApproval(m.id, { decision: m.decision, feedback: m.feedback }); break;
       case 'diff': this.showDiff(m.id); break;
       case 'open': {
@@ -171,11 +193,16 @@ ${panelBody()}
         break;
       }
       case 'saveSetup': {
-        const c = vscode.workspace.getConfiguration('oaiAgent');
+        const c = vscode.workspace.getConfiguration(CONFIG);
         await c.update('baseUrl', m.baseUrl, vscode.ConfigurationTarget.Global);
         await c.update('model', m.model, vscode.ConfigurationTarget.Global);
-        // Only store the context window when it differs, so the default can change in later versions.
-        if (m.contextWindow && Number(m.contextWindow) !== c.get('contextWindow')) await c.update('contextWindow', Number(m.contextWindow), vscode.ConfigurationTarget.Global);
+        if (['ask', 'autoEdit', 'auto'].includes(m.approvalMode) && m.approvalMode !== c.get('approvalMode')) await c.update('approvalMode', m.approvalMode, vscode.ConfigurationTarget.Global);
+        // A memory preset sets both compaction sizes. "Custom" sends neither and leaves them alone.
+        const at = Number(m.compactAt), to = Number(m.compactTo);
+        if (at > 0 && to > 0 && to < at && (at !== c.get('compactAt') || to !== c.get('compactTo'))) {
+          await c.update('compactAt', at, vscode.ConfigurationTarget.Global);
+          await c.update('compactTo', to, vscode.ConfigurationTarget.Global);
+        }
         if (m.apiKey === null) await this.context.secrets.delete(SECRET_KEY);
         else if (m.apiKey) await this.context.secrets.store(SECRET_KEY, m.apiKey);
         this.post({ type: 'panelClose' });
@@ -187,7 +214,7 @@ ${panelBody()}
         if (typeof m.url === 'string' && /^https:\/\//i.test(m.url)) await vscode.env.openExternal(vscode.Uri.parse(m.url));
         break;
       }
-      case 'openSettings': vscode.commands.executeCommand('workbench.action.openSettings', 'oaiAgent'); break;
+      case 'openSettings': vscode.commands.executeCommand('workbench.action.openSettings', '@ext:local.oai-agent'); break;
       // ----- history -----
       case 'history': this.post({ type: 'history', items: await this.listChats() }); break;
       case 'loadChat': await this.loadChat(m.id); break;
@@ -203,7 +230,7 @@ ${panelBody()}
 
   async setupState() {
     const c = getConfig();
-    return { baseUrl: c.baseUrl, model: c.model, contextWindow: c.contextWindow, hasKey: !!(await this.getKey()) };
+    return { baseUrl: c.baseUrl, model: c.model, compactAt: c.compactAt, compactTo: c.compactTo, approvalMode: c.approvalMode, hasKey: !!(await this.getKey()) };
   }
 
   editorContext() {
@@ -305,7 +332,8 @@ ${panelBody()}
   }
 }
 
-function activate(context) {
+async function activate(context) {
+  await migrateSettings();
   const provider = new ChatViewProvider(context);
   // Always-visible way back to the panel, wherever it is docked or hidden.
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
@@ -329,7 +357,7 @@ function activate(context) {
     vscode.commands.registerCommand('oaiAgent.approve', () => provider.answerOldest('yes')),
     vscode.commands.registerCommand('oaiAgent.deny', () => provider.answerOldest('no')),
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration('oaiAgent')) provider.sendConfig();
+      if (e.affectsConfiguration(CONFIG)) provider.sendConfig();
     }),
   );
   // Returned for the tests that run inside VS Code (test/vscode).

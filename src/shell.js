@@ -1,6 +1,6 @@
 // Which shell run_command uses, and how to start it.
 // Windows: PowerShell by default (PowerShell 7 if installed, else the built-in Windows PowerShell 5.1).
-// Elsewhere: the system shell. The oaiAgent.shell setting overrides both.
+// Elsewhere: the system shell. The starkCode.shell setting overrides both.
 const { findPowerShell } = require('./psreadonly');
 
 /**

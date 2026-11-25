@@ -160,7 +160,7 @@ class Agent {
     const cfg = this.getConfig();
     const root = this.getRoot();
     try {
-      if (!cfg.model) throw new Error('No model configured. Set "oaiAgent.model" in Settings.');
+      if (!cfg.model) throw new Error('No model configured. Set "starkCode.model" in Settings.');
       if (!this.messages.length) this.messages.push({ role: 'system', content: buildSystemPrompt(root, cfg) });
       this.turn = ++this.turnCounter;
       this.messages.push({ role: 'user', content: userText, _turn: this.turn, _display: displayText || userText });
