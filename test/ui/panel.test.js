@@ -157,7 +157,8 @@ ui('while the agent works: Enter queues a message, the button stops, queued mess
   assert.strictEqual(await page.locator('.msg.queued').count(), 3);
   await page.click('.msg.queued >> nth=1 >> .qx');
   assert.deepStrictEqual(await sent(), [{ type: 'unqueue', id: 'q2' }]);
-  await send({ type: 'user', text: 'also update the README', turn: 2, queuedId: 'q1' });
+  await send({ type: 'queued', id: 'q4', text: 'fourth note' });
+  await send({ type: 'user', text: 'also update the README\n\nfourth note', turn: 2, queuedIds: ['q1', 'q4'] });
   assert.strictEqual(await page.locator('.msg.queued').count(), 1);
   assert.strictEqual(await page.locator('.msg.user:not(.queued)').count(), 1);
   await page.fill('#input', 'draft');

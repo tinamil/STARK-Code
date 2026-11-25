@@ -315,7 +315,7 @@
         break;
       }
       case 'user': {
-        if (m.queuedId) { const q = log.querySelector(`.queued[data-qid="${CSS.escape(m.queuedId)}"]`); if (q) q.remove(); }
+        for (const id of m.queuedIds || []) { const q = log.querySelector(`.queued[data-qid="${CSS.escape(id)}"]`); if (q) q.remove(); }
         const d = add('user', `<div class="ut">${esc(m.text).replace(/\n/g, '<br>')}</div><button class="rewind" title="Rewind: restore files the agent changed since this message and edit it">↶ Rewind</button>`);
         d.querySelector('.rewind').onclick = () => vscode.postMessage({ type: 'revert', turn: m.turn });
         break;

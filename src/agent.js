@@ -79,14 +79,17 @@ class Agent {
   }
   unqueue(id) { this.queued = this.queued.filter((q) => q.id !== id); }
 
-  /** Deliver queued messages as new user turns. Only called between steps, when every tool call has its result. */
+  /**
+   * Deliver everything queued as one new user turn (several messages are joined with a blank line).
+   * Only called between steps, when every tool call has its result.
+   */
   takeQueued() {
     if (!this.queued.length) return false;
-    for (const q of this.queued.splice(0)) {
-      this.turn = ++this.turnCounter;
-      this.messages.push({ role: 'user', content: q.text, _turn: this.turn, _display: q.display });
-      this.ui.post({ type: 'user', text: q.display, turn: this.turn, queuedId: q.id });
-    }
+    const batch = this.queued.splice(0);
+    const display = batch.map((q) => q.display).join('\n\n');
+    this.turn = ++this.turnCounter;
+    this.messages.push({ role: 'user', content: batch.map((q) => q.text).join('\n\n'), _turn: this.turn, _display: display });
+    this.ui.post({ type: 'user', text: display, turn: this.turn, queuedIds: batch.map((q) => q.id) });
     return true;
   }
 
@@ -226,7 +229,8 @@ class Agent {
   async loop(cfg, root) {
     const signal = this.abort.signal;
     for (let step = 0; step < (cfg.maxSteps || 100); step++) {
-      if (step > 0) this.takeQueued();
+      // Not right after another user message (e.g. the automatic "continue"), so user messages never come two in a row.
+      if (step > 0 && this.messages[this.messages.length - 1].role !== 'user') this.takeQueued();
       await this.maybeCompact(cfg);
 
       let partial = '';

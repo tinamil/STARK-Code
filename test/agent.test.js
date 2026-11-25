@@ -414,7 +414,7 @@ test('messages typed while the agent works are delivered between steps', async (
   assert.strictEqual(srv.requests[2].body.messages.at(-1).content, 'and add a test');
   assert.strictEqual(agent.messages.at(-1).content, 'All done.');
   const users = posts.filter((p) => p.type === 'user');
-  assert.deepStrictEqual(users.map((u) => [u.text, u.turn, !!u.queuedId]), [['fix the bug', 1, false], ['also update the README', 2, true], ['and add a test', 3, true]]);
+  assert.deepStrictEqual(users.map((u) => [u.text, u.turn, (u.queuedIds || []).length]), [['fix the bug', 1, 0], ['also update the README', 2, 1], ['and add a test', 3, 1]]);
   assert.ok(!posts.some((p) => p.type === 'queuedLeft'));
 });
 
@@ -473,4 +473,22 @@ test('Stop during the slow read-only check: no approval prompt is shown and the 
   await Promise.race([run, new Promise((_, rej) => setTimeout(() => rej(new Error('run did not end after Stop')), 5000))]);
   assert.strictEqual(approvals.length, 0);
   assert.strictEqual(agent.busy, false);
+});
+
+test('several queued messages are delivered as one message, one bubble and one rewind point', async (t) => {
+  let n = 0; let agentRef;
+  const srv = await mockServer(async (req, body, res) => {
+    if (n++ === 0) { agentRef.enqueue('use tabs <context>c</context>', 'use tabs'); agentRef.enqueue('and rename it to utils.js', 'and rename it to utils.js'); return sseChat(res, [toolCall('list_dir', {})], { finish: 'tool_calls' }); }
+    sseChat(res, [{ content: 'Done.' }]);
+  });
+  t.after(srv.close);
+  const { agent, posts } = makeAgent({ base: srv.base, root: tempWorkspace() });
+  agentRef = agent;
+  await agent.run('start');
+  const roles = srv.requests[1].body.messages.map((m) => m.role);
+  assert.deepStrictEqual(roles, ['system', 'user', 'assistant', 'tool', 'user'], 'no two user messages in a row');
+  assert.strictEqual(srv.requests[1].body.messages.at(-1).content, 'use tabs <context>c</context>\n\nand rename it to utils.js');
+  const bubble = posts.filter((p) => p.type === 'user').at(-1);
+  assert.deepStrictEqual([bubble.text, bubble.turn, bubble.queuedIds.length], ['use tabs\n\nand rename it to utils.js', 2, 2]);
+  assert.strictEqual(agent.turnCounter, 2);
 });
