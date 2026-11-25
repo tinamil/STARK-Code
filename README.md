@@ -59,6 +59,7 @@ On Windows, commands run in PowerShell: PowerShell 7 if it is installed, otherwi
 ## Approvals
 - An edit's approval card shows the change as a diff, plus the agent's one-line explanation of what it does and why. Commands show their explanation too. **Open in diff editor** (Ctrl/Cmd+Enter) opens VS Code's side-by-side view.
 - Enter allows, Esc denies, and Ctrl/Cmd+Enter opens the diff. These work only while focus is on the prompt's card, so pressing a key while reading something else never answers a prompt.
+- A prompt that appears while you are typing a message does not take the keyboard: your typing stays in the message box, and you answer the prompt by clicking it or with Ctrl/Cmd+Alt+Y / N. A prompt that does take focus ignores Enter and Space for half a second.
 - If a prompt is waiting but scrolled out of view, a bar above the input says so; click it to jump to the prompt.
 - From anywhere in VS Code, use Ctrl/Cmd+Alt+Y to allow and Ctrl/Cmd+Alt+N to deny. The agent panel never takes focus from your editor.
 - Type feedback and press Enter to deny with a message. The agent continues using your feedback.

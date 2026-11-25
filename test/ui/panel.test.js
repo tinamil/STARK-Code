@@ -31,6 +31,10 @@ ui('approval card: Allow is focused; Enter allows, Esc denies, feedback denies w
   await page.focus('#input');
   await send(tool('a')); await send(approval('a'));
   assert.strictEqual(await page.evaluate(() => document.activeElement.dataset.a), 'yes');
+  // A key already on its way when the card appears does not answer it.
+  await page.keyboard.press('Enter'); await page.keyboard.press('Space');
+  assert.deepStrictEqual(await sent(), []);
+  await page.waitForTimeout(600);
   await page.keyboard.press('Enter');
   await send(tool('b')); await send(approval('b'));
   await page.keyboard.press('Escape');
@@ -40,6 +44,20 @@ ui('approval card: Allow is focused; Enter allows, Esc denies, feedback denies w
     { type: 'approve', id: 'a', decision: 'yes', feedback: '' }, { type: 'approve', id: 'b', decision: 'no', feedback: '' },
     { type: 'approve', id: 'c', decision: 'no', feedback: 'use pnpm' }]);
   assert.strictEqual(await page.locator('.approval').count(), 0);
+});
+
+ui('a prompt that appears while a message is being typed does not take the keyboard', async ({ page, send, sent }) => {
+  await page.focus('#input');
+  await page.keyboard.type('also update the');
+  await send(tool('a')); await send(approval('a'));
+  assert.strictEqual(await page.evaluate(() => document.activeElement.id), 'input');
+  await page.keyboard.type(' readme');
+  assert.strictEqual(await page.inputValue('#input'), 'also update the readme');
+  await page.keyboard.press('Enter');
+  assert.deepStrictEqual((await sent()).map((m) => m.type).filter((t) => t === 'approve'), []);
+  assert.strictEqual(await page.locator('.approval').count(), 1, 'the prompt is still waiting');
+  await page.click('.approval [data-a="yes"]');
+  assert.deepStrictEqual((await sent()).map((m) => [m.type, m.decision]), [['approve', 'yes']]);
 });
 
 ui('keys outside the card never answer a prompt', async ({ page, send, sent }) => {
