@@ -278,3 +278,34 @@ test('panel shows shortened tool arguments; the model and the file get the full 
   assert.strictEqual(fs.readFileSync(path.join(root, 'big.txt'), 'utf8').length, 50000);
   assert.strictEqual(JSON.parse(agent.messages.find((m) => m.tool_calls).tool_calls[0].function.arguments).content.length, 50000);
 });
+
+test('rolling compaction keeps the conversation between the low and high marks', async (t) => {
+  let step = 0; const sizes = []; let summaries = 0; let lastSummaryInput = '';
+  const est = (msgs) => Math.ceil(JSON.stringify(msgs).length / 3.5);
+  const srv = await mockServer(async (req, body, res) => {
+    if (!body.tools) { summaries++; lastSummaryInput = body.messages[1].content; return sseChat(res, [{ content: `SUMMARY #${summaries}: user asked "read the files then fix f0"` }]); }
+    sizes.push(est(body.messages));
+    if (step < 12) { const i = step++; return sseChat(res, [toolCall('read_file', { path: `f${i}.txt` })], { finish: 'tool_calls' }); }
+    if (step++ === 12) return sseChat(res, [toolCall('edit_file', { path: 'f11.txt', old_string: 'marker', new_string: 'changed' })], { finish: 'tool_calls' });
+    sseChat(res, [{ content: 'All done.' }]);
+  });
+  t.after(srv.close);
+  const files = {}; for (let i = 0; i < 12; i++) files[`f${i}.txt`] = `marker ${i}\n` + 'some file content here\n'.repeat(120);
+  const root = tempWorkspace(files);
+  const { agent, posts } = makeAgent({ base: srv.base, root, config: { compactAt: 6000, compactTo: 3000 } });
+  await agent.run('read the files then fix f0');
+  assert.deepStrictEqual(posts.filter((p) => p.type === 'error'), []);
+  assert.strictEqual(agent.messages.at(-1).content, 'All done.');
+  assert.ok(summaries >= 2, `compacted repeatedly (${summaries})`);
+  assert.ok(Math.max(...sizes) < 6000 + 1500, `requests stay near the high mark (max ${Math.max(...sizes)})`);
+  assert.match(lastSummaryInput, /SUMMARY #\d/, 'later summaries build on the earlier summary');
+  assert.match(fs.readFileSync(path.join(root, 'f11.txt'), 'utf8'), /^changed 11/, 'a file still in the conversation can be edited without re-reading');
+  assert.ok(posts.some((p) => p.type === 'info' && /Summarized earlier steps/.test(p.text)));
+});
+
+test('compaction marks: defaults, window cap, and low mark below high', () => {
+  const { agent, cfg } = makeAgent({ base: 'http://127.0.0.1:1/v1', root: tempWorkspace() });
+  assert.deepStrictEqual(agent.compactionMarks(cfg), { window: 1000000, high: 50000, low: 10000 });
+  assert.deepStrictEqual(agent.compactionMarks({ ...cfg, contextWindow: 32000 }), { window: 32000, high: 22400, low: 10000 });
+  assert.deepStrictEqual(agent.compactionMarks({ ...cfg, compactAt: 200000, compactTo: 150000 }), { window: 1000000, high: 200000, low: 100000 });
+});

@@ -416,17 +416,33 @@ class Agent {
     this.limits = { ...L, tokensRemaining: undefined, requestsRemaining: undefined };   // window reset; wait for fresh headers
   }
 
-  async maybeCompact(cfg) {
+  /**
+   * Rolling compaction. When the conversation passes the high mark (compactAt, default 50k tokens),
+   * the oldest steps are summarized so it drops to about the low mark (compactTo, default 10k).
+   * The high mark never exceeds 70% of the effective context window.
+   */
+  compactionMarks(cfg) {
     const window = this.effectiveWindow(cfg);
-    if (estTokens(this.messages) < window * 0.7) return;
+    const high = Math.max(2000, Math.min(cfg.compactAt > 0 ? cfg.compactAt : 50000, Math.floor(window * 0.7)));
+    let low = cfg.compactTo > 0 ? cfg.compactTo : 10000;
+    if (low > high / 2) low = Math.floor(high / 2);
+    return { window, high, low };
+  }
 
-    // Keep a recent tail (~30% of window) starting at an assistant/user boundary so tool pairs stay intact.
+  async maybeCompact(cfg) {
+    const { window, high, low } = this.compactionMarks(cfg);
+    const before = estTokens(this.messages);
+    if (before < high) return;
+
+    // Keep the most recent steps: what fits in the low mark after the system prompt and the summary.
+    const tailBudget = Math.max(1500, low - estTokens([this.messages[0]]) - 1200);
     let size = 0, cut = this.messages.length;
     for (let i = this.messages.length - 1; i > 1; i--) {
       size += estTokens([this.messages[i]]);
-      if (size > window * 0.3) break;
+      if (size > tailBudget) break;
       cut = i;
     }
+    // Cut at an assistant/user boundary so tool calls stay paired with their results.
     while (cut < this.messages.length && this.messages[cut].role === 'tool') cut++;
     if (cut >= this.messages.length) cut = this.messages.length - 1;
     while (cut > 1 && this.messages[cut].role === 'tool') cut--;
@@ -434,8 +450,16 @@ class Agent {
     const head = this.messages.slice(1, cut);
     if (head.length < 2) { this.shrinkToolOutputs(); return; }
 
-    this.ui.post({ type: 'info', text: 'Context is getting full — summarizing earlier conversation…' });
-    const summary = await this.summarize(cfg, head, window);
+    // The summary request itself can be too large (a big chat reopened from History, before the
+    // gateway's limits are known): shrink what is sent and try again.
+    let summary, sumWindow = window;
+    for (let attempt = 0; ; attempt++) {
+      try { summary = await this.summarize(cfg, head, sumWindow); break; }
+      catch (e) {
+        if (attempt >= 2 || this.abort.signal.aborted || !(e.tooLarge || isContextOverflow(e))) throw e;
+        sumWindow = Math.floor(Math.min(sumWindow, this.effectiveWindow(cfg)) / 2);
+      }
+    }
     this.messages = [
       this.messages[0],
       { role: 'user', content: `[Summary of earlier conversation in this session]\n${summary}` },
@@ -445,8 +469,22 @@ class Agent {
     if (this.messages[3] && this.messages[3].role === 'assistant' && this.messages[2].role === 'assistant') {
       this.messages.splice(2, 1);
     }
+    this.rebuildReadFiles();
+    if (estTokens(this.messages) > high) this.shrinkToolOutputs();
+    this.ui.post({ type: 'info', text: `Summarized earlier steps to keep the conversation small (about ${Math.round(before / 1000)}k → ${Math.round(estTokens(this.messages) / 1000)}k tokens).` });
+  }
+
+  /** After compaction, only files whose contents are still in the conversation count as read. */
+  rebuildReadFiles() {
     this.readFiles.clear();
-    if (estTokens(this.messages) > window * 0.7) this.shrinkToolOutputs();
+    const root = this.getRoot();
+    const answered = new Set(this.messages.filter((m) => m.role === 'tool' && !/^Error:/.test(String(m.content))).map((m) => m.tool_call_id));
+    for (const m of this.messages) {
+      for (const tc of m.tool_calls || []) {
+        if (!['read_file', 'write_file'].includes(tc.function.name) || !answered.has(tc.id)) continue;
+        try { const p = JSON.parse(tc.function.arguments).path; if (p) this.readFiles.add(resolvePath(root, p)); } catch { /* bad args */ }
+      }
+    }
   }
 
   /** Ask the model for a summary of `msgs` that lets the work continue. `focus` is optional user guidance. */
@@ -459,7 +497,7 @@ class Agent {
     }).join('\n\n');
     const maxChars = Math.floor(window * 0.5 * 3.5);
     const r = await this.callModel(cfg, [
-      { role: 'system', content: 'You compress coding-agent transcripts. Write a dense summary that lets the agent continue the work: the user\'s requests (quote them verbatim), decisions made, files read/changed and how, commands run and their outcomes, errors encountered, current state, and remaining TODOs. No preamble.' + (focus ? `\n\nThe user asked the summary to focus on: ${focus}` : '') },
+      { role: 'system', content: 'You compress coding-agent transcripts. Write a dense summary (at most about 600 words) that lets the agent continue the work: the user\'s requests (quote them verbatim), decisions made, files read/changed and how, commands run and their outcomes, errors encountered, current state, and remaining TODOs. The transcript may begin with an earlier summary: carry forward everything in it that still matters. No preamble.' + (focus ? `\n\nThe user asked the summary to focus on: ${focus}` : '') },
       { role: 'user', content: transcript.length > maxChars ? '...[older part omitted]...\n' + transcript.slice(-maxChars) : transcript },
     ], false);
     if (!r.content || !r.content.trim()) throw new Error('The model returned an empty summary.');
