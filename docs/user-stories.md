@@ -2,7 +2,7 @@
 
 Who it is for: a developer on a locked-down machine (no marketplace, possibly no internet) using the STARK gateway or another OpenAI-compatible endpoint.
 
-Each story lists where it stands. "Built" means implemented and covered by automated tests; anything that has only been checked outside real VS Code says so.
+Each story lists where it stands. "Built" means implemented and covered by automated tests. Three kinds of tests run on every change: unit tests, panel tests in a headless browser, and tests inside a real VS Code. None of them use the real model, so how well the agent does a task still depends on trying it with your model.
 
 ## Setup
 1. **First run.** I install the .vsix, enter a URL, model and key, and get a working answer within 2 minutes.
@@ -12,7 +12,7 @@ Each story lists where it stands. "Built" means implemented and covered by autom
 
 ## Everyday coding
 3. **Small fix.** I describe a bug in one sentence; the agent finds the code, edits it and shows me the change. I approve in one keystroke.
-   - Built: the approval card shows the diff and the agent's one-line reason. Enter allows, Esc denies, only while focus is on the card.
+   - Built: the approval card shows the diff and the agent's one-line reason. Enter allows, Esc denies, only while focus is on the card. Ctrl+Alt+Y and Ctrl+Alt+N work from anywhere (checked in real VS Code).
 4. **Feature across files.** I ask for a feature touching 5+ files. The agent plans it, makes the edits, runs the build and tests, and fixes failures.
    - Built: task list, edits, commands. Not yet measured with the real model on a large task.
 5. **Explain code.** I select code and ask what it does. The agent reads related files and answers without editing.
@@ -29,7 +29,7 @@ Each story lists where it stands. "Built" means implemented and covered by autom
 9. **Stop and redirect.** I can stop the agent, or add instructions while it works.
    - Built: Stop button; messages typed while it works are queued and delivered after the current step.
 10. **Undo.** I can revert everything the agent changed since a given message.
-    - Built: Rewind restores edited files (exact bytes and encoding) and the conversation. Edits to open files can also be undone with Ctrl+Z. Changes made by shell commands are not tracked.
+    - Built: Rewind restores edited files (exact bytes and encoding) and the conversation. Edits to open files can also be undone with Ctrl+Z (checked in real VS Code). Changes made by shell commands are not tracked.
 11. **No surprises.** The agent never runs destructive commands or edits outside the workspace without asking, whatever mode I am in.
     - Built. A stray key press can't answer a prompt, and a prompt scrolled out of view is flagged.
 
@@ -37,7 +37,7 @@ Each story lists where it stands. "Built" means implemented and covered by autom
 12. **Long session.** I work with the agent for an hour and it still remembers what I asked for.
     - Built: stale output is trimmed and older steps are summarized as it goes. My requests, the files it changed and the task list are kept word for word. `/compact` does this on demand.
 13. **Resume later.** I close VS Code and reopen the previous chat the next day.
-    - Built: History per workspace; the newest 100 chats are kept for 90 days.
+    - Built: History per workspace; the newest 100 chats are kept for 90 days. If VS Code reloads the panel mid-task, the conversation and any waiting prompt come back (checked in real VS Code).
 
 ## Team and environment
 14. **Project rules.** I commit an AGENTS.md with conventions and the agent follows it for everyone.

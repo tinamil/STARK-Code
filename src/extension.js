@@ -324,6 +324,8 @@ function activate(context) {
       if (e.affectsConfiguration('oaiAgent')) provider.sendConfig();
     }),
   );
+  // Returned for the tests that run inside VS Code (test/vscode).
+  return { provider };
 }
 
 function deactivate() {}

@@ -26,7 +26,7 @@ jobs:
         with:
           node-version: 22
       # Panel tests run the real webview in headless Chromium (Linux only; skipped elsewhere).
-      - name: Install Playwright
+      - name: Install dev dependencies and Chromium
         if: runner.os == 'Linux'
         run: npm ci && npx playwright install --with-deps chromium
       - name: Tests (PowerShell 7 for the script checker)
@@ -34,6 +34,10 @@ jobs:
         env:
           REQUIRE_POWERSHELL: '1'
           REQUIRE_UI: ${{ runner.os == 'Linux' && '1' || '' }}
+      # Launches a real VS Code (downloaded by @vscode/test-electron) with the extension loaded.
+      - name: Tests inside VS Code
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:vscode
       - name: Script checker on Windows PowerShell 5.1
         if: runner.os == 'Windows'
         run: node --test test/psreadonly.test.js
