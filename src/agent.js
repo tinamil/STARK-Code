@@ -353,6 +353,8 @@ class Agent {
       if (diff) prep.summary = `${prep.summary} (+${diff.adds} −${diff.dels})`;
       const explanation = typeof args.explanation === 'string' ? args.explanation.slice(0, 500) : '';
       const need = this.needsApproval(tool, args, cfg, prep, root);
+      // Stopped while the checks above were running: don't show a prompt nobody will answer.
+      if (this.abort.signal.aborted) return done(false, 'Interrupted by user.');
       if (need) {
         const canDiff = typeof prep.newContent === 'string';
         if (canDiff) this.ui.registerProposal(id, { path: prep.path, newContent: prep.newContent });
