@@ -1,29 +1,52 @@
-# STARK Code: user stories (draft)
+# STARK Code: user stories
 
-Assumption: the main user is a developer on a locked-down machine (no marketplace, possibly no internet) using an internal or self-hosted OpenAI-compatible model.
+Who it is for: a developer on a locked-down machine (no marketplace, possibly no internet) using the STARK gateway or another OpenAI-compatible endpoint.
+
+Each story lists where it stands. "Built" means implemented and covered by automated tests; anything that has only been checked outside real VS Code says so.
 
 ## Setup
-1. **First run.** As a developer, I install the .vsix, enter a URL, model and key, and get a working answer within 2 minutes.
-   - The first message checks the connection and tool-calling support, and shows a clear error if either fails.
-2. **Switch models.** As a developer, I switch between a fast model and a strong model without opening Settings.
+1. **First run.** I install the .vsix, enter a URL, model and key, and get a working answer within 2 minutes.
+   - Built: the Setup panel opens on first run. **Test connection** checks the server, a tool call and its result, and reports rate limits, a locked key or an expiring key.
+2. **Switch models.** I switch models without opening Settings.
+   - Built: model dropdown in the header, filled from the server. Models without tool support are marked.
 
 ## Everyday coding
-3. **Small fix.** As a developer, I describe a bug in one sentence and the agent finds the code, edits it and shows me what changed. I approve each edit in one keystroke.
-4. **Feature across files.** As a developer, I ask for a feature touching 5+ files. The agent plans it (todo list), makes the edits, runs the build and tests, and fixes failures without me stepping in, except for approvals.
-5. **Explain code.** As a developer, I select code and ask "what does this do?". The agent reads related files and answers without editing anything.
-6. **Run and fix tests.** As a developer, I say "make the tests pass". The agent runs them, reads the failures and iterates. I can watch the command output live.
+3. **Small fix.** I describe a bug in one sentence; the agent finds the code, edits it and shows me the change. I approve in one keystroke.
+   - Built: the approval card shows the diff and the agent's one-line reason. Enter allows, Esc denies, only while focus is on the card.
+4. **Feature across files.** I ask for a feature touching 5+ files. The agent plans it, makes the edits, runs the build and tests, and fixes failures.
+   - Built: task list, edits, commands. Not yet measured with the real model on a large task.
+5. **Explain code.** I select code and ask what it does. The agent reads related files and answers without editing.
+   - Built: the selection or active file is included with the message; reading never asks for approval inside the workspace.
+6. **Run and fix tests.** I say "make the tests pass". The agent runs them, reads the failures and iterates, and I can watch.
+   - Built: commands run in PowerShell on Windows, with live output in the panel.
 
 ## Control and trust
-7. **Review before applying.** As a developer, I see a diff of each proposed edit and can accept it, reject it, or reject it with feedback ("use the existing helper instead").
-8. **Hands-off mode.** As a developer who trusts the current task, I switch to auto-approving edits for this chat only. Commands still ask.
-9. **Stop and redirect.** As a developer, I can stop the agent mid-task, type a correction and have it continue from where it was.
-10. **Undo.** As a developer, I can revert everything the agent changed since a given message, even without git.
-11. **No surprises.** The agent never runs destructive commands (rm -rf, git push --force, deleting data) without an explicit approval, whatever mode I am in.
+7. **Review before applying.** I see a diff of each edit and can accept, reject, or reject with feedback.
+   - Built.
+8. **Hands-off mode.** I let the agent work with fewer prompts when I trust the task.
+   - Built: `autoEdit` and `auto` approval modes, "Always allow" per tool for the session, and read-only commands and PowerShell scripts run without asking.
+   - Open: the read-only checks have not had an independent security review.
+9. **Stop and redirect.** I can stop the agent, or add instructions while it works.
+   - Built: Stop button; messages typed while it works are queued and delivered after the current step.
+10. **Undo.** I can revert everything the agent changed since a given message.
+    - Built: Rewind restores edited files (exact bytes and encoding) and the conversation. Edits to open files can also be undone with Ctrl+Z. Changes made by shell commands are not tracked.
+11. **No surprises.** The agent never runs destructive commands or edits outside the workspace without asking, whatever mode I am in.
+    - Built. A stray key press can't answer a prompt, and a prompt scrolled out of view is flagged.
 
 ## Long work
-12. **Long session.** As a developer, I work with the agent for an hour. Context is summarized automatically and it still remembers what I originally asked for.
-13. **Resume later.** As a developer, I close VS Code and reopen the previous chat the next day.
+12. **Long session.** I work with the agent for an hour and it still remembers what I asked for.
+    - Built: stale output is trimmed and older steps are summarized as it goes. My requests, the files it changed and the task list are kept word for word. `/compact` does this on demand.
+13. **Resume later.** I close VS Code and reopen the previous chat the next day.
+    - Built: History per workspace; the newest 100 chats are kept for 90 days.
 
-## Team / environment
-14. **Project rules.** As a team lead, I commit an AGENTS.md with conventions ("use pnpm", "never edit generated/") and the agent follows it for everyone.
-15. **Offline.** As a developer with no internet, everything except web_fetch works against an internal endpoint, with no outbound calls.
+## Team and environment
+14. **Project rules.** I commit an AGENTS.md with conventions and the agent follows it for everyone.
+    - Built: AGENTS.md, CLAUDE.md, `.github/copilot-instructions.md` and `.oai-agent.md` are added to the system prompt.
+15. **Offline.** Everything except fetching web pages works against an internal endpoint, with no other outbound calls.
+    - Built: the only requests are to the configured endpoint, plus `web_fetch` when the agent asks and I approve. There is no update check.
+16. **Shared limits.** I stay inside my gateway budget without thinking about it.
+    - Built: the agent reads the gateway's rate-limit headers, waits instead of hitting a limit, keeps requests under the per-minute token limit, and shows the daily credits.
+
+## Not built
+- Updates: users re-download the .vsix when a new version is announced.
+- Images, MCP servers and sub-agents.

@@ -64,7 +64,7 @@ function tempWorkspace(files = {}) {
 /** Agent with a recording UI. approve(req) decides approvals (default: allow). */
 function makeAgent({ base, root, config = {}, approve, io } = {}) {
   const posts = [], approvals = [];
-  const cfg = { apiMode: 'chat', baseUrl: base, model: 'm', approvalMode: 'ask', maxSteps: 20, contextWindow: 1000000, autoApproveCommands: [], ...config };
+  const cfg = { baseUrl: base, model: 'm', approvalMode: 'ask', maxSteps: 20, contextWindow: 1000000, autoApproveCommands: [], ...config };
   const agent = new Agent({
     getConfig: () => cfg, getApiKey: async () => 'test-key', getRoot: () => root, io,
     ui: {

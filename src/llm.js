@@ -1,5 +1,4 @@
 // Streaming client for OpenAI-compatible endpoints with tool calling.
-// Supports /chat/completions ("chat" mode) and /responses ("responses" mode).
 // Both return the same shape: { content, reasoning, toolCalls[], finishReason, usage, meta }.
 
 class LlmError extends Error {
@@ -191,111 +190,6 @@ async function streamChat(opts) {
   return finalize(out);
 }
 
-// ---------------- /responses ----------------
-/** Convert chat-format history to Responses API instructions + input items (stateless, store:false). */
-function toResponsesInput(messages) {
-  const instructions = [];
-  const input = [];
-  for (const m of messages) {
-    if (m.role === 'system') instructions.push(m.content);
-    else if (m.role === 'user') input.push({ role: 'user', content: m.content });
-    else if (m.role === 'assistant') {
-      if (m.content) input.push({ role: 'assistant', content: m.content });
-      for (const tc of m.tool_calls || []) {
-        input.push({ type: 'function_call', call_id: tc.id, name: tc.function.name, arguments: tc.function.arguments || '{}' });
-      }
-    } else if (m.role === 'tool') input.push({ type: 'function_call_output', call_id: m.tool_call_id, output: String(m.content) });
-  }
-  return { instructions: instructions.join('\n\n') || undefined, input };
-}
-
-async function streamResponses(opts) {
-  const { baseUrl, apiKey, model, messages, tools, signal, onText, onReasoning,
-    extraBody = {}, headers = {}, maxTokens, temperature } = opts;
-  const { instructions, input } = toResponsesInput(messages);
-  const body = { model, input, stream: true, store: false, ...extraBody };
-  if (instructions) body.instructions = instructions;
-  if (tools && tools.length) {
-    body.tools = tools.map((t) => ({ type: 'function', name: t.function.name, description: t.function.description, parameters: t.function.parameters }));
-  }
-  if (maxTokens) body.max_output_tokens = maxTokens;
-  if (typeof temperature === 'number') body.temperature = temperature;
-
-  const url = baseUrl.replace(/\/+$/, '') + '/responses';
-  const res = await post(url, body, { apiKey, headers, signal });
-  const out = { content: '', reasoning: '', toolCalls: [], finishReason: null, usage: null, meta: readMeta(res.headers) };
-  const byItem = new Map();   // item id / output_index -> tool call
-  const callFor = (item, idx) => {
-    const key = item && item.id ? item.id : `idx${idx}`;
-    let c = byItem.get(key) || (idx != null ? byItem.get(`idx${idx}`) : undefined);
-    if (!c) {
-      c = { id: '', type: 'function', function: { name: '', arguments: '' } };
-      byItem.set(key, c); if (idx != null) byItem.set(`idx${idx}`, c);
-      out.toolCalls.push(c);
-    }
-    return c;
-  };
-  const applyFinal = (r) => {
-    if (!r) return;
-    if (r.usage) out.usage = { prompt_tokens: r.usage.input_tokens, completion_tokens: r.usage.output_tokens, total_tokens: r.usage.total_tokens };
-    if (r.status === 'incomplete') out.finishReason = (r.incomplete_details && r.incomplete_details.reason) === 'max_output_tokens' ? 'length' : 'incomplete';
-    else if (r.status) out.finishReason = r.status === 'completed' ? 'stop' : r.status;
-    if (r.status === 'failed') throw new LlmError(`Response failed: ${JSON.stringify(r.error || {})}`, false);
-  };
-  const applyItem = (item, idx) => {
-    if (item.type === 'function_call') {
-      const c = callFor(item, idx);
-      c.id = item.call_id || c.id; c.function.name = item.name || c.function.name;
-      if (typeof item.arguments === 'string' && item.arguments) c.function.arguments = item.arguments;
-    }
-  };
-
-  const raw = await readSse(res, (type, j) => {
-    switch (type) {
-      case 'response.output_text.delta':
-        out.content += j.delta; onText && onText(j.delta); break;
-      case 'response.reasoning_summary_text.delta':
-      case 'response.reasoning_text.delta':
-        out.reasoning += j.delta; onReasoning && onReasoning(j.delta); break;
-      case 'response.output_item.added':
-      case 'response.output_item.done':
-        if (j.item) applyItem(j.item, j.output_index); break;
-      case 'response.function_call_arguments.delta': {
-        const c = callFor({ id: j.item_id }, j.output_index); c.function.arguments += j.delta; break;
-      }
-      case 'response.function_call_arguments.done': {
-        const c = callFor({ id: j.item_id }, j.output_index); if (typeof j.arguments === 'string') c.function.arguments = j.arguments; break;
-      }
-      case 'response.completed':
-      case 'response.incomplete':
-      case 'response.failed':
-        applyFinal(j.response); break;
-      case 'error':
-        throw new LlmError(`Stream error: ${JSON.stringify(j.error || j)}`, false);
-    }
-  });
-
-  if (raw !== null && raw.trim()) {   // non-streaming JSON response
-    let r;
-    try { r = JSON.parse(raw); } catch { throw new LlmError(`Unexpected response: ${raw.slice(0, 500)}`, false); }
-    if (r.error) throw new LlmError(`API error: ${JSON.stringify(r.error)}`, false);
-    (r.output || []).forEach((item, i) => {
-      if (item.type === 'message') {
-        for (const c of item.content || []) if (c.type === 'output_text' && c.text) { out.content += c.text; onText && onText(c.text); }
-      } else applyItem(item, i);
-    });
-    applyFinal(r);
-  }
-  // Some servers report status "completed" even when they stop to call tools.
-  if (out.toolCalls.length && out.finishReason === 'stop') out.finishReason = 'tool_calls';
-  return finalize(out);
-}
-
-/** Dispatch on opts.apiMode ('chat' | 'responses'). */
-function complete(opts) {
-  return opts.apiMode === 'responses' ? streamResponses(opts) : streamChat(opts);
-}
-
 // ---------------- models / connection test ----------------
 /** Returns [{id, tools}] where tools is true/false if the server reports capabilities, else undefined. */
 async function listModels({ baseUrl, apiKey, headers = {} }) {
@@ -315,7 +209,7 @@ async function listModels({ baseUrl, apiKey, headers = {} }) {
 
 async function probeTools(opts) {
   const t0 = Date.now();
-  const r = await complete({
+  const r = await streamChat({
     ...opts,
     messages: [{ role: 'user', content: 'Call the get_weather tool for the city "Paris". Respond only with the tool call.' }],
     tools: [{ type: 'function', function: { name: 'get_weather', description: 'Get weather for a city', parameters: { type: 'object', properties: { city: { type: 'string' } }, required: ['city'] } } }],
@@ -331,7 +225,7 @@ async function probeTools(opts) {
   // Second step: send the tool result back, as the agent does on every step. This catches gateways
   // that drop tool messages and providers that need fields echoed back (e.g. Gemini thought signatures).
   try {
-    const r2 = await complete({
+    const r2 = await streamChat({
       ...opts,
       messages: [
         { role: 'user', content: 'Call the get_weather tool for the city "Paris". Respond only with the tool call.' },
@@ -350,11 +244,10 @@ async function probeTools(opts) {
   return res;
 }
 
-/** Checks reachability, chat, and tool calling. Returns { ok, lines, models, suggestMode? }. */
+/** Checks reachability, chat, and tool calling. Returns { ok, lines, models, unlockUrl? }. */
 async function testConnection(opts) {
   const lines = [];
-  const mode = opts.apiMode === 'responses' ? 'responses' : 'chat';
-  const ep = mode === 'responses' ? '/responses' : '/chat/completions';
+  const ep = '/chat/completions';
   let models = [];
   try {
     models = await listModels(opts);
@@ -378,18 +271,6 @@ async function testConnection(opts) {
         lines.push('✓ The model calls tools');
         lines.push(`✗ Sending the tool result back via ${ep} failed: ${p.roundTripError}. The agent can't take more than one step until this works.`);
       } else lines.push(`✗ Tool calling failed via ${ep}: the model ${p.why}.`);
-      // Try the other API before giving up — some gateways only pass tools through one of them.
-      const other = mode === 'chat' ? 'responses' : 'chat';
-      const otherEp = other === 'responses' ? '/responses' : '/chat/completions';
-      try {
-        const q = await probeTools({ ...opts, apiMode: other });
-        if (q.ok) {
-          lines.push(`✓ Tool calling works via ${otherEp}. Switch "API" to "${other}".`);
-          if (meta.keyExpiringSoon) lines.push(`⚠ API key expires ${meta.keyExpiresAt || 'within 7 days'}`);
-          return { ok: false, lines, models, suggestMode: other };
-        }
-        lines.push(`✗ Also failed via ${otherEp}${q.roundTripError ? ` (${q.roundTripError.slice(0, 150)})` : ''}. The model or gateway may not support multi-step tool calling.`);
-      } catch (e) { lines.push(`• ${otherEp} not usable: ${e.message.slice(0, 200)}`); }
     }
     if (meta.creditsRemaining !== undefined) lines.push(`• Credits today: ${meta.creditsRemaining}${meta.creditsLimit !== undefined ? ` / ${meta.creditsLimit}` : ''} remaining`);
     if (meta.tokensLimit !== undefined || meta.requestsLimit !== undefined) {
@@ -404,4 +285,4 @@ async function testConnection(opts) {
   }
 }
 
-module.exports = { complete, streamChat, streamResponses, toResponsesInput, listModels, testConnection, readMeta, LlmError };
+module.exports = { streamChat, listModels, testConnection, readMeta, LlmError };
