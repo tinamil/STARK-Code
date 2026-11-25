@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { complete } = require('./llm');
-const { toolDefs, getTool, truncate, resolvePath } = require('./tools');
+const { toolDefs, getTool, truncate, resolvePath, rel } = require('./tools');
 const { buildSystemPrompt } = require('./prompt');
 const { diffLines } = require('./diff');
 const readonly = require('./readonly');
@@ -11,7 +11,7 @@ const textfile = require('./textfile');
 const MAX_CHECKPOINT_BYTES = 2 * 1024 * 1024;
 const psreadonly = require('./psreadonly');
 
-const estTokens = (msgs) => Math.ceil(JSON.stringify(msgs).length / 3.5);
+const DEFAULT_CHARS_PER_TOKEN = 3.5;
 // Strip internal fields (prefixed with _) before sending to the API.
 // Also drop empty content on tool-call-only assistant messages (chats saved by older versions have "").
 const forApi = (msgs) => msgs.map((m) => {
@@ -46,6 +46,7 @@ class Agent {
   constructor({ getConfig, getApiKey, getRoot, ui, io }) {
     this.getConfig = getConfig; this.getApiKey = getApiKey; this.getRoot = getRoot; this.ui = ui;
     this.io = io || textfile;
+    this.charsPerToken = DEFAULT_CHARS_PER_TOKEN;   // calibrated from the gateway's real token counts
     this.limits = null;       // latest gateway rate-limit headers (per key, kept across chats)
     this.limitsAt = 0;
     this.capNoticeShown = false;
@@ -60,6 +61,8 @@ class Agent {
     this.created = Date.now();
     this.readFiles = new Set();
     this.learnedWindow = 0;    // lower limit discovered from a context-overflow error, for this chat
+    this.pinned = { requests: [], todos: null };   // kept word for word across summaries
+    this.title = '';
     this.sessionAllowed = new Set();
     this.busy = false;
     this.abort = null;
@@ -67,17 +70,29 @@ class Agent {
 
   stop() { if (this.abort) this.abort.abort(); }
 
+  /** Estimated tokens for messages, using the characters-per-token ratio measured on this gateway. */
+  est(msgs) { return Math.ceil(JSON.stringify(msgs).length / this.charsPerToken); }
+
+  /** Learn the real characters-per-token ratio from a reply's reported prompt size. */
+  calibrate(chars, promptTokens) {
+    if (!(promptTokens > 500) || !(chars > 0)) return;
+    const ratio = Math.min(8, Math.max(1.5, chars / promptTokens));
+    this.charsPerToken = this.calibrated ? this.charsPerToken * 0.5 + ratio * 0.5 : ratio;
+    this.calibrated = true;
+  }
+
   toJSON() {
-    const first = this.messages.find((m) => m.role === 'user' && m._display);
     return { id: this.chatId, created: this.created, updated: Date.now(), root: this.getRoot(),
-      title: first ? first._display.slice(0, 80) : '(untitled)', messages: this.messages,
-      checkpoints: this.checkpoints, turnCounter: this.turnCounter };
+      title: this.title || '(untitled)', messages: this.messages,
+      checkpoints: this.checkpoints, turnCounter: this.turnCounter, pinned: this.pinned };
   }
 
   load(d) {
     this.reset();
     this.chatId = d.id; this.created = d.created; this.messages = d.messages || [];
     this.checkpoints = d.checkpoints || []; this.turnCounter = d.turnCounter || 0;
+    this.pinned = d.pinned || { requests: [], todos: null };
+    this.title = d.title && d.title !== '(untitled)' ? d.title : '';
     // Refresh the system prompt (environment/date/project instructions may have changed).
     if (this.messages[0] && this.messages[0].role === 'system') this.messages[0].content = buildSystemPrompt(this.getRoot(), this.getConfig());
   }
@@ -101,6 +116,7 @@ class Agent {
       skipped.delete(c.path);
     }
     this.checkpoints = this.checkpoints.filter((c) => c.turn < turn);
+    this.pinned.requests = this.pinned.requests.filter((r) => r.turn < turn);
     const idx = this.messages.findIndex((m) => m.role === 'user' && m._turn === turn);
     let text = '', rewound = false;
     if (idx > 0) { text = this.messages[idx]._display || ''; this.messages = this.messages.slice(0, idx); rewound = true; }
@@ -130,6 +146,7 @@ class Agent {
       if (!this.messages.length) this.messages.push({ role: 'system', content: buildSystemPrompt(root, cfg) });
       this.turn = ++this.turnCounter;
       this.messages.push({ role: 'user', content: userText, _turn: this.turn, _display: displayText || userText });
+      if (!this.title) this.title = String(displayText || userText).slice(0, 80);
       this.ui.post({ type: 'user', text: displayText || userText, turn: this.turn });
       await this.loop(cfg, root);
     } catch (e) {
@@ -146,9 +163,11 @@ class Agent {
     for (let attempt = 0; ; attempt++) {
       let streamed = false;
       try {
-        await this.throttle(estTokens(messages) + (withTools ? 1300 : 0));
+        const sent = forApi(messages);
+        const sentChars = JSON.stringify(sent).length + (withTools ? JSON.stringify(toolDefs()).length : 0);
+        await this.throttle(Math.ceil(sentChars / this.charsPerToken));
         const r = await complete({
-          apiMode: cfg.apiMode, baseUrl: cfg.baseUrl, apiKey, model: cfg.model, messages: forApi(messages),
+          apiMode: cfg.apiMode, baseUrl: cfg.baseUrl, apiKey, model: cfg.model, messages: sent,
           tools: withTools ? toolDefs() : undefined,
           signal: this.abort.signal,
           onText: (t) => { streamed = true; onText && onText(t); },
@@ -157,12 +176,13 @@ class Agent {
           maxTokens: cfg.maxTokens, temperature: cfg.temperature,
         });
         if (r.meta && Object.keys(r.meta).length) { this.updateLimits(r.meta); this.ui.post({ type: 'meta', meta: r.meta }); }
+        if (r.usage) this.calibrate(sentChars, r.usage.prompt_tokens);
         return r;
       } catch (e) {
         if (e.meta) this.updateLimits(e.meta);
         // Larger than the per-minute token limit: retrying can never succeed; the caller compacts instead.
         const tpm = this.limits && this.limits.tokensLimit;
-        if (tpm && estTokens(messages) > tpm * 0.9 && /^HTTP 429\b/.test(e.message || '')) { e.tooLarge = true; throw e; }
+        if (tpm && this.est(messages) > tpm * 0.9 && /^HTTP 429\b/.test(e.message || '')) { e.tooLarge = true; throw e; }
         const maxAttempts = 5;
         if (this.abort.signal.aborted || streamed || !e.retryable || attempt >= maxAttempts) throw e;
         // Honor Retry-After (rate limits); otherwise exponential backoff.
@@ -200,7 +220,7 @@ class Agent {
           continue;
         }
         if (!signal.aborted && !partial && isContextOverflow(e) && (this.overflowRetries = (this.overflowRetries || 0) + 1) <= 3) {
-          const est = estTokens(this.messages);
+          const est = this.est(this.messages);
           this.learnedWindow = Math.max(8000, Math.floor(Math.min(est, this.effectiveWindow(cfg)) * 0.8));
           this.ui.post({ type: 'info', text: `The model's context limit is smaller than the configured ${Math.round((cfg.contextWindow || 0) / 1000)}k. Using about ${Math.round(this.learnedWindow / 1000)}k for this chat and summarizing earlier messages.` });
           step--;
@@ -211,7 +231,7 @@ class Agent {
         this.ui.post({ type: 'assistantEnd' });
       }
       this.overflowRetries = 0;
-      if (r.usage) this.ui.post({ type: 'usage', usage: r.usage, est: estTokens(this.messages), window: this.effectiveWindow(cfg) });
+      if (r.usage) this.ui.post({ type: 'usage', usage: r.usage, est: this.est(this.messages), window: this.effectiveWindow(cfg) });
 
       // Match the gateway's documented shape: a tool-call-only assistant message has no content
       // field (an empty string can reach Gemini as an empty text part, which it rejects).
@@ -426,16 +446,12 @@ class Agent {
     return { window, high, low };
   }
 
-  async maybeCompact(cfg) {
-    const { window, high, low } = this.compactionMarks(cfg);
-    const before = estTokens(this.messages);
-    if (before < high) return;
-
-    // Keep the most recent steps: what fits in the low mark after the system prompt and the summary.
-    const tailBudget = Math.max(1500, low - estTokens([this.messages[0]]) - 1200);
+  /** Index where the kept recent steps start: what fits in the low mark, cut at a step boundary. */
+  tailStart(low) {
+    const tailBudget = Math.max(1500, low - this.est([this.messages[0]]) - 1200);
     let size = 0, cut = this.messages.length;
     for (let i = this.messages.length - 1; i > 1; i--) {
-      size += estTokens([this.messages[i]]);
+      size += this.est([this.messages[i]]);
       if (size > tailBudget) break;
       cut = i;
     }
@@ -443,7 +459,96 @@ class Agent {
     while (cut < this.messages.length && this.messages[cut].role === 'tool') cut++;
     if (cut >= this.messages.length) cut = this.messages.length - 1;
     while (cut > 1 && this.messages[cut].role === 'tool') cut--;
+    return cut;
+  }
 
+  /**
+   * Free space without a model call. Anywhere: file contents that were read again later. Before
+   * `tailStart` (older steps) also: contents of files changed since they were read, and large output.
+   * Returns the number of characters freed.
+   */
+  pruneStale(tailStart) {
+    const root = this.getRoot();
+    const calls = new Map();
+    for (const m of this.messages) {
+      for (const tc of m.tool_calls || []) {
+        let args = {};
+        try { args = JSON.parse(tc.function.arguments) || {}; } catch { /* bad args */ }
+        calls.set(tc.id, { name: tc.function.name, path: typeof args.path === 'string' ? resolvePath(root, args.path) : null, full: !args.offset && !args.limit });
+      }
+    }
+    const lastFullRead = new Map(), lastChange = new Map();
+    this.messages.forEach((m, i) => {
+      const c = m.role === 'tool' && calls.get(m.tool_call_id);
+      if (!c || !c.path || m._pruned || /^Error:/.test(String(m.content))) return;
+      if (c.name === 'read_file' && c.full) lastFullRead.set(c.path, i);
+      if (c.name === 'edit_file' || c.name === 'write_file') lastChange.set(c.path, i);
+    });
+    let freed = 0;
+    this.messages.forEach((m, i) => {
+      const c = m.role === 'tool' && calls.get(m.tool_call_id);
+      if (!c || m._pruned) return;
+      const content = String(m.content);
+      let next = null;
+      if (c.name === 'read_file' && lastFullRead.get(c.path) > i) next = '[Removed: this file was read again later in the conversation.]';
+      else if (i < tailStart) {
+        if (c.name === 'read_file' && lastChange.get(c.path) > i) next = '[Removed: this file was changed after this read. Read it again if you need its contents.]';
+        else if (content.length > 1500) next = `${content.slice(0, 600)}\n[Older output trimmed: ${(content.length - 600).toLocaleString('en-US')} more characters. Run the tool again if you need it.]`;
+      }
+      if (next !== null && next.length < content.length) { freed += content.length - next.length; m.content = next; m._pruned = true; }
+    });
+    return freed;
+  }
+
+  /** Record what must survive summarizing word for word: the user's requests and the latest task list. */
+  collectPinned(removed) {
+    for (const m of removed) {
+      if (m.role === 'user' && m._turn && !this.pinned.requests.some((r) => r.turn === m._turn)) {
+        this.pinned.requests.push({ turn: m._turn, text: String(m._display || m.content || '').slice(0, 2000) });
+      }
+      for (const tc of m.tool_calls || []) {
+        if (tc.function.name !== 'todo_write') continue;
+        try { const t = JSON.parse(tc.function.arguments).todos; if (Array.isArray(t)) this.pinned.todos = t; } catch { /* bad args */ }
+      }
+    }
+  }
+
+  /** The summary message: exact facts kept by the extension, then the model's summary of the rest. */
+  summaryMessage(summary, kept) {
+    const parts = ['[Summary of earlier conversation in this session]'];
+    const reqs = this.pinned.requests;
+    if (reqs.length) {
+      const total = reqs.reduce((n, r) => n + r.text.length, 0);
+      const lines = reqs.map((r, i) => `${i + 1}. ${total > 8000 && i < reqs.length - 5 && r.text.length > 300 ? `${r.text.slice(0, 300)}…` : r.text}`);
+      parts.push(`## The user's requests so far (their exact words, oldest first)\n${lines.join('\n')}`);
+    }
+    const root = this.getRoot();
+    const files = [...new Set(this.checkpoints.map((c) => rel(root, c.path)))];
+    if (files.length) parts.push(`## Files you have changed in this session\n${files.slice(0, 100).map((f) => `- ${f}`).join('\n')}${files.length > 100 ? `\n- …and ${files.length - 100} more` : ''}`);
+    const todoInKept = kept.some((m) => (m.tool_calls || []).some((tc) => tc.function.name === 'todo_write'));
+    if (this.pinned.todos && this.pinned.todos.length && !todoInKept) {
+      parts.push(`## Task list\n${this.pinned.todos.map((t) => `- [${t.status === 'completed' ? 'x' : t.status === 'in_progress' ? '~' : ' '}] ${t.content}`).join('\n')}`);
+    }
+    parts.push(`## Earlier work\n${summary}`);
+    return { role: 'user', content: parts.join('\n\n'), _summary: summary };
+  }
+
+  async maybeCompact(cfg) {
+    const { window, high, low } = this.compactionMarks(cfg);
+    const before = this.est(this.messages);
+    if (before < high) return;
+
+    // First, free space without a model call. Often that is enough.
+    if (this.pruneStale(this.tailStart(low)) > 0) {
+      this.rebuildReadFiles();
+      const after = this.est(this.messages);
+      if (after < high * 0.9) {
+        this.ui.post({ type: 'info', text: `Trimmed old tool output to keep the conversation small (about ${Math.round(before / 1000)}k → ${Math.round(after / 1000)}k tokens).` });
+        return;
+      }
+    }
+
+    const cut = this.tailStart(low);
     const head = this.messages.slice(1, cut);
     if (head.length < 2) { this.shrinkToolOutputs(); return; }
 
@@ -457,25 +562,22 @@ class Agent {
         sumWindow = Math.floor(Math.min(sumWindow, this.effectiveWindow(cfg)) / 2);
       }
     }
-    this.messages = [
-      this.messages[0],
-      { role: 'user', content: `[Summary of earlier conversation in this session]\n${summary}` },
-      { role: 'assistant', content: 'Understood. Continuing from the summary.' },
-      ...this.messages.slice(cut),
-    ];
+    this.collectPinned(head);
+    const kept = this.messages.slice(cut);
+    this.messages = [this.messages[0], this.summaryMessage(summary, kept), { role: 'assistant', content: 'Understood. Continuing from the summary.' }, ...kept];
     if (this.messages[3] && this.messages[3].role === 'assistant' && this.messages[2].role === 'assistant') {
       this.messages.splice(2, 1);
     }
     this.rebuildReadFiles();
-    if (estTokens(this.messages) > high) this.shrinkToolOutputs();
-    this.ui.post({ type: 'info', text: `Summarized earlier steps to keep the conversation small (about ${Math.round(before / 1000)}k → ${Math.round(estTokens(this.messages) / 1000)}k tokens).` });
+    if (this.est(this.messages) > high) this.shrinkToolOutputs();
+    this.ui.post({ type: 'info', text: `Summarized earlier steps to keep the conversation small (about ${Math.round(before / 1000)}k → ${Math.round(this.est(this.messages) / 1000)}k tokens).` });
   }
 
   /** After compaction, only files whose contents are still in the conversation count as read. */
   rebuildReadFiles() {
     this.readFiles.clear();
     const root = this.getRoot();
-    const answered = new Set(this.messages.filter((m) => m.role === 'tool' && !/^Error:/.test(String(m.content))).map((m) => m.tool_call_id));
+    const answered = new Set(this.messages.filter((m) => m.role === 'tool' && !m._pruned && !/^Error:/.test(String(m.content))).map((m) => m.tool_call_id));
     for (const m of this.messages) {
       for (const tc of m.tool_calls || []) {
         if (!['read_file', 'write_file'].includes(tc.function.name) || !answered.has(tc.id)) continue;
@@ -487,6 +589,7 @@ class Agent {
   /** Ask the model for a summary of `msgs` that lets the work continue. `focus` is optional user guidance. */
   async summarize(cfg, msgs, window, focus) {
     const transcript = msgs.map((m) => {
+      if (m._summary !== undefined) return `[earlier summary]\n${m._summary}`;
       if (m.role === 'tool') return `[tool result]\n${String(m.content).slice(0, 1500)}`;
       let s = `[${m.role}]\n${m.content || ''}`;
       if (m.tool_calls) s += '\n' + m.tool_calls.map((t) => `-> ${t.function.name}(${String(t.function.arguments).slice(0, 500)})`).join('\n');
@@ -494,7 +597,7 @@ class Agent {
     }).join('\n\n');
     const maxChars = Math.floor(window * 0.5 * 3.5);
     const r = await this.callModel(cfg, [
-      { role: 'system', content: 'You compress coding-agent transcripts. Write a dense summary (at most about 600 words) that lets the agent continue the work: the user\'s requests (quote them verbatim), decisions made, files read/changed and how, commands run and their outcomes, errors encountered, current state, and remaining TODOs. The transcript may begin with an earlier summary: carry forward everything in it that still matters. No preamble.' + (focus ? `\n\nThe user asked the summary to focus on: ${focus}` : '') },
+      { role: 'system', content: 'You compress coding-agent transcripts. Write a dense summary (at most about 600 words) that lets the agent continue the work: what was found out about the code, decisions made and why, what was changed and how, commands run and their outcomes, errors encountered, the current state, and the next steps. The user\'s requests, the list of changed files and the task list are recorded separately, so do not repeat them. The transcript may begin with an earlier summary: carry forward everything in it that still matters. No preamble.' + (focus ? `\n\nThe user asked the summary to focus on: ${focus}` : '') },
       { role: 'user', content: transcript.length > maxChars ? '...[older part omitted]...\n' + transcript.slice(-maxChars) : transcript },
     ], false);
     if (!r.content || !r.content.trim()) throw new Error('The model returned an empty summary.');
@@ -515,15 +618,12 @@ class Agent {
     this.ui.post({ type: 'status', busy: true });
     this.ui.post({ type: 'info', text: `Compacting the conversation${focus ? ` (focus: ${focus})` : ''}…` });
     try {
-      const before = estTokens(this.messages);
+      const before = this.est(this.messages);
       const summary = await this.summarize(cfg, body, this.effectiveWindow(cfg), focus);
-      this.messages = [
-        this.messages[0],
-        { role: 'user', content: `[Summary of earlier conversation in this session]\n${summary}` },
-        { role: 'assistant', content: 'Understood. Continuing from the summary.' },
-      ];
+      this.collectPinned(body);
+      this.messages = [this.messages[0], this.summaryMessage(summary, []), { role: 'assistant', content: 'Understood. Continuing from the summary.' }];
       this.readFiles.clear();
-      this.ui.post({ type: 'compacted', summary, before, after: estTokens(this.messages) });
+      this.ui.post({ type: 'compacted', summary: this.messages[1].content, before, after: this.est(this.messages) });
       return true;
     } catch (e) {
       if (this.abort.signal.aborted) this.ui.post({ type: 'info', text: 'Compaction stopped; the conversation is unchanged.' });
