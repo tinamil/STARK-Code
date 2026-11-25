@@ -62,14 +62,13 @@ exports.run = async function run() {
   });
 
   test('setup: settings are saved, the key goes to the secret store, the connection test runs', async () => {
-    await provider.onMessage({ type: 'saveSetup', baseUrl: srv.base, model: 'test-model', apiKey: 'secret-key-123', contextWindow: 1000000, approvalMode: 'autoEdit', compactAt: 150000, compactTo: 30000 });
+    await provider.onMessage({ type: 'saveSetup', baseUrl: srv.base, model: 'test-model', apiKey: 'secret-key-123', approvalMode: 'autoEdit', compactAt: 150000, compactTo: 30000 });
     await until(() => vscode.workspace.getConfiguration('starkCode').get('compactTo') === 30000, 'the memory preset');
     assert.deepStrictEqual([vscode.workspace.getConfiguration('starkCode').get('compactAt'), vscode.workspace.getConfiguration('starkCode').get('approvalMode')], [150000, 'autoEdit']);
     await setCfg('compactAt', undefined); await setCfg('compactTo', undefined); await setCfg('approvalMode', undefined);
     await until(() => vscode.workspace.getConfiguration('starkCode').get('model') === 'test-model', 'the model setting');
     assert.strictEqual(vscode.workspace.getConfiguration('starkCode').get('baseUrl'), srv.base);
     assert.strictEqual(await provider.getKey(), 'secret-key-123');
-    assert.strictEqual(vscode.workspace.getConfiguration('starkCode').inspect('contextWindow').globalValue, undefined, 'an unchanged context window is not stored');
     script = [toolCall('get_weather', { city: 'Paris' }), { content: 'Sunny' }];
     await provider.onMessage({ type: 'testSetup', baseUrl: srv.base, model: 'test-model' });
     const r = lastOf('testResult');

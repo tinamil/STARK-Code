@@ -196,8 +196,6 @@ ${panelBody()}
         const c = vscode.workspace.getConfiguration(CONFIG);
         await c.update('baseUrl', m.baseUrl, vscode.ConfigurationTarget.Global);
         await c.update('model', m.model, vscode.ConfigurationTarget.Global);
-        // Only store the context window when it differs, so the default can change in later versions.
-        if (m.contextWindow && Number(m.contextWindow) !== c.get('contextWindow')) await c.update('contextWindow', Number(m.contextWindow), vscode.ConfigurationTarget.Global);
         if (['ask', 'autoEdit', 'auto'].includes(m.approvalMode) && m.approvalMode !== c.get('approvalMode')) await c.update('approvalMode', m.approvalMode, vscode.ConfigurationTarget.Global);
         // A memory preset sets both compaction sizes. "Custom" sends neither and leaves them alone.
         const at = Number(m.compactAt), to = Number(m.compactTo);
@@ -232,7 +230,7 @@ ${panelBody()}
 
   async setupState() {
     const c = getConfig();
-    return { baseUrl: c.baseUrl, model: c.model, contextWindow: c.contextWindow, compactAt: c.compactAt, compactTo: c.compactTo, approvalMode: c.approvalMode, hasKey: !!(await this.getKey()) };
+    return { baseUrl: c.baseUrl, model: c.model, compactAt: c.compactAt, compactTo: c.compactTo, approvalMode: c.approvalMode, hasKey: !!(await this.getKey()) };
   }
 
   editorContext() {

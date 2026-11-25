@@ -188,14 +188,13 @@
         <button id="sToggle" title="Show all models" aria-label="Show all models">▾</button><button id="sFetch" title="Reload models from the server" aria-label="Reload models">↻</button></div>
         <div id="sList" class="clist" role="listbox" hidden></div>
         <div id="sHint" class="hint"></div></div>
-      <label>Context window (tokens)<input id="sCtx" type="number" value="${m.contextWindow || 1000000}"></label>
       <label>Conversation memory<select id="sMem">${memoryOptions(m)}</select></label>
       <label>Approvals<select id="sMode">${APPROVAL_MODES.map(([v, t]) => `<option value="${v}"${v === (m.approvalMode || 'ask') ? ' selected' : ''}>${t}</option>`).join('')}</select></label>
       <div class="btns"><button id="sTest">Test connection</button><button id="sSave" class="primary">Save</button><span class="sp"></span>${m.hasKey ? '<button id="sClear" title="Delete saved key">Clear key</button>' : ''}<button id="sMore">All settings</button></div>
       <pre id="sOut" hidden></pre>`;
     const vals = () => {
       const mem = MEMORY_PRESETS.find((p) => p.id === $('sMem').value);
-      return { baseUrl: $('sBase').value.trim(), model: $('sModel').value.trim(), apiKey: $('sKey').value, contextWindow: $('sCtx').value,
+      return { baseUrl: $('sBase').value.trim(), model: $('sModel').value.trim(), apiKey: $('sKey').value,
         approvalMode: $('sMode').value, ...(mem ? { compactAt: mem.at, compactTo: mem.to } : {}) };
     };
     combo.models = []; combo.state = 'loading'; combo.error = '';

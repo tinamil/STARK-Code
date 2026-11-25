@@ -17,7 +17,7 @@ Switch models from the dropdown at the top. It lists models the server reports p
 If you lose the panel (for example after closing the side bar it was docked in), click **STARK Code** in the status bar, press Ctrl+Alt+S, or run **STARK Code: Open Chat** from the Command Palette.
 
 ## Settings
-Setup covers the connection, conversation memory and approvals. **All settings** opens the rest in VS Code Settings under `starkCode.*`. Settings saved as `oaiAgent.*` by versions before 0.14.0 are moved to the new names automatically.
+Setup covers the connection, conversation memory and approvals. **All settings** opens the rest (context window, shell, timeouts and so on) in VS Code Settings under `starkCode.*`. Settings saved as `oaiAgent.*` by versions before 0.14.0 are moved to the new names automatically.
 
 ## Tools
 read_file, write_file, edit_file, list_dir, glob, grep (uses VS Code's bundled ripgrep), run_command, web_fetch, todo_write.
