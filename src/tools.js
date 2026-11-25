@@ -293,7 +293,7 @@ const TOOLS = [
           ? spawn(sh.exe, powerShellArgs(a.command), opts)
           : spawn(a.command, { ...opts, shell: sh.exe || true });
         let out = '', timedOut = false, done = false;
-        const onData = (d) => { const s = d.toString(); out += s; ctx.log && ctx.log(s); if (out.length > 5e6) out = out.slice(-2e6); };
+        const onData = (d) => { const s = d.toString(); out += s; ctx.log && ctx.log(s); ctx.progress && ctx.progress(s); if (out.length > 5e6) out = out.slice(-2e6); };
         child.stdout.on('data', onData); child.stderr.on('data', onData);
         const timer = setTimeout(() => { timedOut = true; killTree(child); }, timeout);
         const onAbort = () => killTree(child);

@@ -68,6 +68,26 @@ class Agent {
     this.busy = false;
     this.abort = null;
     this.streaming = null;
+    this.queued = [];          // messages typed while the agent works: {id, text, display}
+  }
+
+  /** Add a message while the agent is working; it is delivered after the current step. */
+  enqueue(text, display) {
+    const id = `q${Date.now()}${Math.random().toString(36).slice(2, 6)}`;
+    this.queued.push({ id, text, display: display || text });
+    return id;
+  }
+  unqueue(id) { this.queued = this.queued.filter((q) => q.id !== id); }
+
+  /** Deliver queued messages as new user turns. Only called between steps, when every tool call has its result. */
+  takeQueued() {
+    if (!this.queued.length) return false;
+    for (const q of this.queued.splice(0)) {
+      this.turn = ++this.turnCounter;
+      this.messages.push({ role: 'user', content: q.text, _turn: this.turn, _display: q.display });
+      this.ui.post({ type: 'user', text: q.display, turn: this.turn, queuedId: q.id });
+    }
+    return true;
   }
 
   stop() { if (this.abort) this.abort.abort(); }
@@ -156,6 +176,9 @@ class Agent {
       else this.ui.post({ type: 'error', text: String(e.message || e), unlockUrl: e.unlockUrl });
     } finally {
       this.busy = false;
+      // Messages still queued (stopped, failed, or step limit): hand them back to the input box.
+      const left = this.queued.splice(0);
+      if (left.length) this.ui.post({ type: 'queuedLeft', ids: left.map((q) => q.id), text: left.map((q) => q.display).join('\n\n') });
       this.ui.post({ type: 'status', busy: false });
     }
   }
@@ -203,6 +226,7 @@ class Agent {
   async loop(cfg, root) {
     const signal = this.abort.signal;
     for (let step = 0; step < (cfg.maxSteps || 100); step++) {
+      if (step > 0) this.takeQueued();
       await this.maybeCompact(cfg);
 
       let partial = '';
@@ -249,6 +273,7 @@ class Agent {
           this.messages.push({ role: 'user', content: 'Your response was cut off by the output token limit. Continue exactly where you left off.' });
           continue;
         }
+        if (this.takeQueued()) continue;   // the user added instructions while this reply was being written
         return;
       }
 
@@ -267,6 +292,7 @@ class Agent {
       }
       if (signal.aborted) throw new Error('aborted');
       if (stopAfter) {
+        if (this.takeQueued()) continue;   // the user already said what to do instead
         this.ui.post({ type: 'info', warn: true, text: 'You denied that action, so the agent stopped. Tell it what to do instead.' });
         return;
       }
@@ -338,7 +364,11 @@ class Agent {
     if (!tool) return done(false, `Error: unknown tool "${name}".`);
     if (!args || typeof args !== 'object') return done(false, `Error: arguments for ${name} were not valid JSON: ${tc.function.arguments}`);
 
+    // Live output from a running command, sent to the panel in small batches.
+    let live = '', liveTimer = null;
+    const flushLive = () => { liveTimer = null; if (live) { this.ui.post({ type: 'toolOutput', id, text: live }); live = ''; } };
     const ctx = {
+      progress: (t) => { live = (live + t).slice(-20000); if (!liveTimer) liveTimer = setTimeout(flushLive, 150); },
       root, cfg, signal: this.abort.signal, readFiles: this.readFiles, io: this.io,
       post: (m) => this.ui.post(m), log: (t) => this.ui.log && this.ui.log(t),
     };
@@ -382,6 +412,8 @@ class Agent {
     } catch (e) {
       if (this.abort.signal.aborted) return done(false, 'Interrupted by user.');
       return done(false, `Error: ${e.message || e}`);
+    } finally {
+      clearTimeout(liveTimer);
     }
   }
 

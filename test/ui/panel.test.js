@@ -142,3 +142,44 @@ ui('history, rewind, todos, compaction notice and the limits footer', async ({ p
   assert.match(await page.getAttribute('#usage', 'title'), /Tokens this minute: 480,000 of 500,000 left/);
   assert.match(await page.textContent('#log'), /Less than 10% of today's credits left/);
 });
+
+ui('while the agent works: Enter queues a message, the button stops, queued messages can be removed or handed back', async ({ page, send, sent }) => {
+  await send({ type: 'status', busy: true });
+  assert.strictEqual(await page.textContent('#send'), 'Stop');
+  assert.match(await page.getAttribute('#input', 'placeholder'), /Add instructions while the agent works/);
+  await page.fill('#input', ''); await page.press('#input', 'Enter');
+  await page.fill('#input', 'also update the README'); await page.press('#input', 'Enter');
+  assert.deepStrictEqual(await sent(), [{ type: 'queue', text: 'also update the README', includeContext: true }]);
+  assert.strictEqual(await page.inputValue('#input'), '');
+  await send({ type: 'queued', id: 'q1', text: 'also update the README' });
+  await send({ type: 'queued', id: 'q2', text: 'second note' });
+  await send({ type: 'queued', id: 'q3', text: 'third note' });
+  assert.strictEqual(await page.locator('.msg.queued').count(), 3);
+  await page.click('.msg.queued >> nth=1 >> .qx');
+  assert.deepStrictEqual(await sent(), [{ type: 'unqueue', id: 'q2' }]);
+  await send({ type: 'user', text: 'also update the README', turn: 2, queuedId: 'q1' });
+  assert.strictEqual(await page.locator('.msg.queued').count(), 1);
+  assert.strictEqual(await page.locator('.msg.user:not(.queued)').count(), 1);
+  await page.fill('#input', 'draft');
+  await send({ type: 'queuedLeft', ids: ['q3'], text: 'third note' });
+  assert.strictEqual(await page.locator('.msg.queued').count(), 0);
+  assert.strictEqual(await page.inputValue('#input'), 'draft\n\nthird note');
+  await page.click('#send');
+  assert.deepStrictEqual(await sent(), [{ type: 'stop' }]);
+  await send({ type: 'status', busy: false });
+  assert.strictEqual(await page.textContent('#send'), 'Send');
+  assert.match(await page.getAttribute('#input', 'placeholder'), /Ask the agent/);
+});
+
+ui('a running command shows its latest output, replaced by the result when it finishes', async ({ page, send }) => {
+  await send(tool('c', 'run_command', { command: 'npm test' }));
+  await send({ type: 'toolOutput', id: 'c', text: 'Running 12 tests\n' });
+  await send({ type: 'toolOutput', id: 'c', text: '\u001b[32m✓\u001b[0m login works\n' });
+  assert.strictEqual(await page.isVisible('.tool .live'), true);
+  assert.strictEqual(await page.textContent('.tool .live'), 'Running 12 tests\n✓ login works\n');
+  await send({ type: 'toolOutput', id: 'c', text: 'x'.repeat(5000) });
+  assert.strictEqual((await page.textContent('.tool .live')).length, 3000);
+  await send({ type: 'toolResult', id: 'c', ok: true, output: 'Exit code: 0\nall passed' });
+  assert.strictEqual(await page.locator('.tool .live').count(), 0);
+  assert.strictEqual(await page.textContent('.tool .out'), 'Exit code: 0\nall passed');
+});

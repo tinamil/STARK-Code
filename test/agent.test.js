@@ -393,3 +393,70 @@ test('token estimates are calibrated from the gateway\'s real counts', async (t)
   agent.calibrate(1000, 10);   // too small a sample: ignored
   assert.ok(Math.abs(agent.charsPerToken - 2) < 0.05);
 });
+
+test('messages typed while the agent works are delivered between steps', async (t) => {
+  let n = 0; let agentRef;
+  const srv = await mockServer(async (req, body, res) => {
+    n++;
+    if (n === 1) { agentRef.enqueue('also update the README <context>x</context>', 'also update the README'); return sseChat(res, [toolCall('list_dir', {})], { finish: 'tool_calls' }); }
+    if (n === 2) { agentRef.enqueue('and add a test', 'and add a test'); return sseChat(res, [{ content: 'First part done.' }]); }
+    sseChat(res, [{ content: 'All done.' }]);
+  });
+  t.after(srv.close);
+  const { agent, posts } = makeAgent({ base: srv.base, root: tempWorkspace() });
+  agentRef = agent;
+  await agent.run('fix the bug', 'fix the bug');
+  // Request 2 carries the first queued message, after the tool result it followed.
+  assert.deepStrictEqual(srv.requests[1].body.messages.map((m) => m.role), ['system', 'user', 'assistant', 'tool', 'user']);
+  assert.match(srv.requests[1].body.messages.at(-1).content, /also update the README/);
+  // The second arrived during the final reply, so the agent kept going instead of stopping.
+  assert.strictEqual(srv.requests.length, 3);
+  assert.strictEqual(srv.requests[2].body.messages.at(-1).content, 'and add a test');
+  assert.strictEqual(agent.messages.at(-1).content, 'All done.');
+  const users = posts.filter((p) => p.type === 'user');
+  assert.deepStrictEqual(users.map((u) => [u.text, u.turn, !!u.queuedId]), [['fix the bug', 1, false], ['also update the README', 2, true], ['and add a test', 3, true]]);
+  assert.ok(!posts.some((p) => p.type === 'queuedLeft'));
+});
+
+test('queued messages: removed ones are not sent; unsent ones come back when the agent is stopped', async (t) => {
+  let agentRef;
+  const srv = await mockServer(async (req, body, res) => {
+    const keep = agentRef.enqueue('keep this'); const drop = agentRef.enqueue('drop this');
+    agentRef.unqueue(drop);
+    sseChat(res, [toolCall('run_command', { command: 'npm publish' })], { finish: 'tool_calls' });
+  });
+  t.after(srv.close);
+  const { agent, posts } = makeAgent({ base: srv.base, root: tempWorkspace(), approve: () => { agentRef.stop(); return { decision: 'no' }; } });
+  agentRef = agent;
+  await agent.run('go');
+  const left = posts.find((p) => p.type === 'queuedLeft');
+  assert.strictEqual(left.text, 'keep this');
+  assert.deepStrictEqual(agent.queued, []);
+  assert.ok(!agent.messages.some((m) => /drop this|keep this/.test(m.content || '')));
+});
+
+test('denying an action continues with a queued message instead of stopping', async (t) => {
+  let n = 0; let agentRef;
+  const srv = await mockServer(async (req, body, res) => {
+    if (n++ === 0) return sseChat(res, [toolCall('run_command', { command: 'npm publish' })], { finish: 'tool_calls' });
+    sseChat(res, [{ content: 'OK, using pnpm.' }]);
+  });
+  t.after(srv.close);
+  const { agent } = makeAgent({ base: srv.base, root: tempWorkspace(), approve: () => { agentRef.enqueue('use pnpm instead'); return { decision: 'no' }; } });
+  agentRef = agent;
+  await agent.run('publish');
+  assert.strictEqual(agent.messages.at(-1).content, 'OK, using pnpm.');
+  assert.deepStrictEqual(srv.requests[1].body.messages.slice(-2).map((m) => m.role), ['tool', 'user']);
+});
+
+test('a running command streams its output to the panel before it finishes', async (t) => {
+  const srv = await scriptedModel([toolCall('run_command', { command: `node -e "console.log('first'); setTimeout(() => console.log('second'), 500)"` })]);
+  t.after(srv.close);
+  const { agent, posts } = makeAgent({ base: srv.base, root: tempWorkspace(), config: { approvalMode: 'auto', shell: process.platform === 'win32' ? 'cmd.exe' : '' } });
+  await agent.run('run it');
+  const types = posts.map((p) => p.type);
+  const firstLive = types.indexOf('toolOutput'), result = types.indexOf('toolResult');
+  assert.ok(firstLive > -1 && firstLive < result, 'live output arrives before the result');
+  assert.match(posts.filter((p) => p.type === 'toolOutput').map((p) => p.text).join(''), /first/);
+  assert.match(posts[result].output, /first[\s\S]*second/);
+});

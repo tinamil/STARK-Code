@@ -40,6 +40,11 @@ STARK locks API keys 14 days after they're created or unlocked. When that happen
 - `X-Stark-Key-Expiring-Soon` triggers a warning that your key is near expiry.
 - If `/models` reports `capabilities.tools: false`, the model picker marks that model "(no tools)".
 
+## While the agent works
+- **Add instructions:** type a message and press Enter while the agent is working. It is queued and delivered after the current step, so you can correct or extend the task without stopping it. A queued message can be removed before it is sent. If the agent stops first, the message goes back into the input box.
+- **Stop:** the Send button becomes Stop while the agent works.
+- **Command output:** a running command shows its latest output under its row as it arrives. The full output replaces it when the command finishes.
+
 ## Commands
 On Windows, commands run in PowerShell: PowerShell 7 if it is installed, otherwise the built-in Windows PowerShell 5.1. On macOS and Linux they run in the system shell. The agent is told which shell it has. Set `oaiAgent.shell` to `cmd.exe`, `pwsh`, or a shell path to override.
 
